@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "bomly.plugin.package.v1",
+  "id": "govulncheck",
+  "name": "govulncheck Reachability Analyzer",
+  "version": "0.1.0",
+  "kind": "analyzer",
+  "runtime": "hashicorp-grpc",
+  "pluginApiVersion": "bomly.plugin.v1",
+  "entrypoint": {
+    "linux/amd64": "bomly-plugin-govulncheck-analyzer",
+    "linux/arm64": "bomly-plugin-govulncheck-analyzer",
+    "darwin/amd64": "bomly-plugin-govulncheck-analyzer",
+    "darwin/arm64": "bomly-plugin-govulncheck-analyzer",
+    "windows/amd64": "bomly-plugin-govulncheck-analyzer.exe"
+  },
+  "description": "Go reachability analyzer for Bomly: runs govulncheck (golang.org/x/vuln) to mark which vulnerabilities are actually reachable from your code, at symbol and package tiers.",
+  "homepage": "https://github.com/bomly-dev/bomly-plugin-govulncheck-analyzer",
+  "license": "Apache-2.0"
+}
