@@ -40,7 +40,7 @@ func discoverModuleRoots(req model.AnalyzeRequest) []string {
 	}
 
 	if req.Graph != nil {
-		for _, pkg := range req.Graph.Nodes() {
+		for _, pkg := range req.Graph.DependencyNodes() {
 			if pkg == nil || !isGoPackage(pkg) {
 				continue
 			}

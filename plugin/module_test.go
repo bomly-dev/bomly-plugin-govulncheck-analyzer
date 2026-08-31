@@ -56,7 +56,7 @@ func TestPackageUpdatesEquivalence(t *testing.T) {
 		},
 	}
 
-	legacyGraph, legacyReg := newGoGraph(moduleDir, vuln)
+	legacyGraph, legacyReg := newGoGraph(t, moduleDir, vuln)
 	legacy := Analyzer{DisableCache: true, Runner: &fakeRunner{result: runnerResult}}
 	legacyRes, err := legacy.Analyze(context.Background(), model.AnalyzeRequest{
 		Graph: legacyGraph, Registry: legacyReg, ProjectPath: moduleDir,
@@ -71,7 +71,7 @@ func TestPackageUpdatesEquivalence(t *testing.T) {
 		t.Fatalf("legacy path must return the annotated request registry (got %p, want %p): plugin-boundary hosts cannot see in-place mutation", legacyRes.Registry, legacyReg)
 	}
 
-	deltaGraph, deltaReg := newGoGraph(moduleDir, vuln)
+	deltaGraph, deltaReg := newGoGraph(t, moduleDir, vuln)
 	delta := Analyzer{DisableCache: true, Runner: &fakeRunner{result: runnerResult}}
 	deltaRes, err := delta.Analyze(context.Background(), model.AnalyzeRequest{
 		Graph: deltaGraph, Registry: deltaReg, ProjectPath: moduleDir,
@@ -87,7 +87,7 @@ func TestPackageUpdatesEquivalence(t *testing.T) {
 		t.Fatal("delta path returned no package updates")
 	}
 
-	_, pristineReg := newGoGraph(moduleDir, vuln)
+	_, pristineReg := newGoGraph(t, moduleDir, vuln)
 	merged := model.ApplyPackageUpdates(pristineReg, deltaRes.PackageUpdates)
 
 	clearAnalyzedAt(legacyReg)

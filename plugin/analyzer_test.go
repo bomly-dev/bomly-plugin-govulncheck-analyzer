@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	model "github.com/bomly-dev/bomly-sdk"
+	"github.com/bomly-dev/bomly-sdk/testkit"
 )
 
 // fakeRunner returns a canned RunnerResult or error for tests.
@@ -37,14 +38,17 @@ func newGoModuleDir(t *testing.T) string {
 
 // newGoGraph builds a single-Go-dependency graph plus a registry whose package
 // (keyed by the dependency's PURL) carries the supplied vulnerabilities.
-func newGoGraph(moduleDir string, vulns ...model.Vulnerability) (*model.Graph, *model.PackageRegistry) {
+func newGoGraph(t testing.TB, moduleDir string, vulns ...model.Vulnerability) (*model.Graph, *model.PackageRegistry) {
+	t.Helper()
 	g := model.New()
-	dep := model.NewDependency(model.Dependency{Coordinates: model.Coordinates{Name: "example.com/lib",
+	dep := testkit.MustDependencyCoords(t, model.Coordinates{
+		Name:           "example.com/lib",
 		Version:        "v1.0.0",
 		Ecosystem:      "go",
-		PackageManager: "gomod"}, Locations: []model.PackageLocation{{RealPath: filepath.Join(moduleDir, "go.sum")}},
+		PackageManager: "gomod",
 	})
-	purl := model.CanonicalPackageURLFromDependency(dep)
+	dep.Locations = []model.PackageLocation{{RealPath: filepath.Join(moduleDir, "go.sum")}}
+	purl := dep.NodeID()
 	dep.PackageRef = purl
 	_ = g.AddNode(dep)
 
@@ -68,7 +72,7 @@ func firstVulnReachability(t *testing.T, registry *model.PackageRegistry) *model
 func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
 	vuln := model.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
-	g, registry := newGoGraph(moduleDir, vuln)
+	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{
 		result: RunnerResult{
@@ -117,7 +121,7 @@ func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 func TestAnalyzerMarksUnreachableWhenImportedButNotCalled(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
 	vuln := model.Vulnerability{ID: "GO-2024-2", Source: "osv", ParsedSeverity: "high"}
-	g, registry := newGoGraph(moduleDir, vuln)
+	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{
 		result: RunnerResult{
@@ -139,7 +143,7 @@ func TestAnalyzerMarksUnreachableWhenImportedButNotCalled(t *testing.T) {
 func TestAnalyzerMarksUnreachableTierPackageWhenModuleNotImported(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
 	vuln := model.Vulnerability{ID: "GO-2024-3", Source: "osv", ParsedSeverity: "high"}
-	g, registry := newGoGraph(moduleDir, vuln)
+	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	// Runner returns nothing — no findings, no imported modules.
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{result: RunnerResult{}}}
@@ -156,7 +160,7 @@ func TestAnalyzerMarksUnreachableTierPackageWhenModuleNotImported(t *testing.T) 
 func TestAnalyzerDegradesToUnknownOnRunnerError(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
 	vuln := model.Vulnerability{ID: "GO-2024-4", Source: "osv", ParsedSeverity: "high"}
-	g, registry := newGoGraph(moduleDir, vuln)
+	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{err: errors.New("govulncheck binary not found")}}
 	_, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
@@ -181,7 +185,7 @@ func TestAnalyzerBridgesCVEToGOIDViaAliases(t *testing.T) {
 		ParsedSeverity: "high",
 		Aliases:        []string{"GO-2024-5", "GHSA-aaaa-bbbb-cccc"},
 	}
-	g, registry := newGoGraph(moduleDir, vuln)
+	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{
 		result: RunnerResult{
@@ -213,8 +217,8 @@ func TestAnalyzerApplicableRequiresGoVulns(t *testing.T) {
 	// build a graph+registry where dep's package carries the given vulns.
 	build := func(name, ecosystem string, vulns ...model.Vulnerability) (*model.Graph, *model.PackageRegistry) {
 		g := model.New()
-		dep := model.NewDependency(model.Dependency{Coordinates: model.Coordinates{Name: name, Ecosystem: model.Ecosystem(ecosystem)}})
-		purl := model.CanonicalPackageURLFromDependency(dep)
+		dep := testkit.MustDependencyCoords(t, model.Coordinates{Name: name, Ecosystem: model.Ecosystem(ecosystem)})
+		purl := dep.NodeID()
 		dep.PackageRef = purl
 		_ = g.AddNode(dep)
 		registry := model.NewPackageRegistry()
@@ -227,12 +231,12 @@ func TestAnalyzerApplicableRequiresGoVulns(t *testing.T) {
 		t.Errorf("Applicable on npm-only graph = (%v, %v); want (false, nil)", ok, err)
 	}
 
-	g, registry = build("lib", "go", model.Vulnerability{ID: "x"})
+	g, registry = build("example.com/lib", "go", model.Vulnerability{ID: "x"})
 	if ok, err := a.Applicable(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || !ok {
 		t.Errorf("Applicable on go-with-vulns graph = (%v, %v); want (true, nil)", ok, err)
 	}
 
-	g, registry = build("lib", "go")
+	g, registry = build("example.com/lib", "go")
 	if ok, err := a.Applicable(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || ok {
 		t.Errorf("Applicable on go-without-vulns graph = (%v, %v); want (false, nil)", ok, err)
 	}
