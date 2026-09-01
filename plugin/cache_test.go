@@ -86,7 +86,7 @@ func TestAnalyzerWithCacheServesSecondCallFromCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	vuln := model.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
-	g, registry := newGoGraph(moduleDir, vuln)
+	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	runner := &fakeRunner{
 		result: RunnerResult{
@@ -105,7 +105,7 @@ func TestAnalyzerWithCacheServesSecondCallFromCache(t *testing.T) {
 	}
 
 	// Re-run with a fresh graph — runner should not be invoked thanks to cache.
-	g2, registry2 := newGoGraph(moduleDir, vuln)
+	g2, registry2 := newGoGraph(t, moduleDir, vuln)
 	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g2, Registry: registry2, ProjectPath: moduleDir}); err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +132,8 @@ func TestAnalyzerDisableCacheAlwaysRunsRunner(t *testing.T) {
 	}
 	a := Analyzer{Runner: runner, CacheDir: t.TempDir(), DisableCache: true}
 
-	g1, registry1 := newGoGraph(moduleDir, vuln)
-	g2, registry2 := newGoGraph(moduleDir, vuln)
+	g1, registry1 := newGoGraph(t, moduleDir, vuln)
+	g2, registry2 := newGoGraph(t, moduleDir, vuln)
 	cases := []struct {
 		g        *model.Graph
 		registry *model.PackageRegistry

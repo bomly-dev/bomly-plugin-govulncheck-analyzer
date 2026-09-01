@@ -59,7 +59,7 @@ func (a Analyzer) Applicable(_ context.Context, req model.AnalyzeRequest) (bool,
 	if req.Graph == nil || req.Registry == nil {
 		return false, nil
 	}
-	for _, dep := range req.Graph.Nodes() {
+	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
@@ -73,14 +73,14 @@ func (a Analyzer) Applicable(_ context.Context, req model.AnalyzeRequest) (bool,
 }
 
 // dependencyPURL returns the registry key for a dependency node.
-func dependencyPURL(dep *model.Dependency) string {
+func dependencyPURL(dep *model.DependencyNode) string {
 	if dep == nil {
 		return ""
 	}
 	if dep.PackageRef != "" {
 		return dep.PackageRef
 	}
-	return model.CanonicalPackageURLFromDependency(dep)
+	return dep.NodeID()
 }
 
 // Analyze runs govulncheck per Go module root and writes Reachability
@@ -234,7 +234,7 @@ func resultFromRequest(req model.AnalyzeRequest) model.AnalyzeResult {
 
 // vulnerabilitiesForDependency returns the registry vulnerabilities for a
 // dependency node, or nil when the package is absent from the registry.
-func vulnerabilitiesForDependency(req model.AnalyzeRequest, dep *model.Dependency) []model.Vulnerability {
+func vulnerabilitiesForDependency(req model.AnalyzeRequest, dep *model.DependencyNode) []model.Vulnerability {
 	if req.Registry == nil || dep == nil {
 		return nil
 	}
@@ -258,7 +258,7 @@ type applyOutcome struct {
 func applyRunnerResult(req model.AnalyzeRequest, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
 	var outcome applyOutcome
 	timestamp := now.UTC().Format(time.RFC3339)
-	for _, dep := range req.Graph.Nodes() {
+	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
@@ -268,13 +268,19 @@ func applyRunnerResult(req model.AnalyzeRequest, moduleRoot string, runRes Runne
 		vulns := vulnerabilitiesForDependency(req, dep)
 		for i := range vulns {
 			vuln := &vulns[i]
-			if vuln.Reachability != nil && vuln.Reachability.Analyzer == Name {
-				continue // already annotated by an earlier module pass
-			}
+			// No skip on an earlier module pass. That skip was the loss
+			// phase 2.8 removes: a workspace's second module could reach a
+			// symbol the first did not, and the first answer stood. Each
+			// module root now contributes its own evidence and the
+			// annotation is the derived summary over all of them.
 			finding, hit := lookupFinding(runRes, vuln)
-			r := &model.Reachability{
-				Analyzer:   Name,
-				AnalyzedAt: timestamp,
+			r := &model.ReachabilityEvidence{
+				ModuleRoot: moduleRoot,
+				// govulncheck resolves per Go module, so the finding is
+				// attributable to this exact occurrence node.
+				DependencyRefs: []string{dep.NodeID()},
+				Analyzer:       Name,
+				AnalyzedAt:     timestamp,
 			}
 			switch {
 			case hit && finding.CalledBy:
@@ -300,16 +306,35 @@ func applyRunnerResult(req model.AnalyzeRequest, moduleRoot string, runRes Runne
 				outcome.unreachable++
 			}
 			_ = runnerName // reserved for future Reason annotation
-			vuln.Reachability = r
+			vuln.Reachability = withEvidence(vuln.Reachability, *r, timestamp)
 		}
 	}
 	return outcome
 }
 
+// withEvidence appends one module root's finding to a vulnerability's
+// reachability record and recomputes the summary.
+//
+// The summary is derived, never accumulated by hand: reachable anywhere wins,
+// and unreachable requires every module root to say so. Writing that rule at
+// each call site is how the first-module-wins behaviour got there.
+func withEvidence(current *model.Reachability, evidence model.ReachabilityEvidence, timestamp string) *model.Reachability {
+	var all []model.ReachabilityEvidence
+	if current != nil && current.Analyzer == Name {
+		all = current.Evidence
+	}
+	all = append(all, evidence)
+	summary := model.DeriveReachability(all)
+	summary.Analyzer = Name
+	summary.AnalyzedAt = timestamp
+	summary.Evidence = all
+	return &summary
+}
+
 func annotateModuleUnknown(req model.AnalyzeRequest, moduleRoot, reason string, now time.Time) int {
 	timestamp := now.UTC().Format(time.RFC3339)
 	count := 0
-	for _, dep := range req.Graph.Nodes() {
+	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
@@ -321,13 +346,18 @@ func annotateModuleUnknown(req model.AnalyzeRequest, moduleRoot, reason string, 
 			if vulns[i].Reachability != nil {
 				continue
 			}
-			vulns[i].Reachability = &model.Reachability{
+			// Recorded as evidence rather than as the whole answer: a
+			// module that could not be analyzed must not overwrite another
+			// module's finding, and it must stop an all-unreachable summary
+			// from reading as unreachable. DeriveReachability enforces both.
+			vulns[i].Reachability = withEvidence(vulns[i].Reachability, model.ReachabilityEvidence{
+				ModuleRoot: moduleRoot,
 				Analyzer:   Name,
 				Status:     model.ReachabilityUnknown,
 				Tier:       model.TierNone,
 				Reason:     reason,
 				AnalyzedAt: timestamp,
-			}
+			}, timestamp)
 			count++
 		}
 	}
@@ -336,7 +366,7 @@ func annotateModuleUnknown(req model.AnalyzeRequest, moduleRoot, reason string, 
 
 func annotateAllUnknown(req model.AnalyzeRequest, reason string, now time.Time) {
 	timestamp := now.UTC().Format(time.RFC3339)
-	for _, dep := range req.Graph.Nodes() {
+	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
@@ -392,7 +422,7 @@ func lookupFinding(r RunnerResult, vuln *model.Vulnerability) (Finding, bool) {
 
 // isGoPackage reports whether pkg's ecosystem or build system identifies
 // it as a Go module dependency.
-func isGoPackage(pkg *model.Dependency) bool {
+func isGoPackage(pkg *model.DependencyNode) bool {
 	if pkg == nil {
 		return false
 	}
@@ -413,7 +443,7 @@ func isGoPackage(pkg *model.Dependency) bool {
 // (or with no recorded location) is treated as belonging to it. In
 // multi-module repos this may over-attribute; the second pass through
 // applyRunnerResult skips already-annotated vulns to avoid double-counting.
-func packageBelongsToModuleRoot(pkg *model.Dependency, moduleRoot string) bool {
+func packageBelongsToModuleRoot(pkg *model.DependencyNode, moduleRoot string) bool {
 	if pkg == nil {
 		return false
 	}
@@ -442,9 +472,17 @@ func pathContainsRoot(path, root string) bool {
 	return !strings.HasPrefix(rel, "..")
 }
 
-func packageImportedByModule(pkg *model.Dependency, importedModules map[string]struct{}) bool {
+func packageImportedByModule(pkg *model.DependencyNode, importedModules map[string]struct{}) bool {
 	if pkg == nil || len(importedModules) == 0 {
 		return false
+	}
+	// EcosystemName is the SDK's authority for the ecosystem-native name, and
+	// for Go that is the module path. Name alone is no longer it: identity
+	// normalization splits "example.com/lib" into Org "example.com" and Name
+	// "lib", so matching on Name would compare "lib" against an imported
+	// module set keyed by full paths and never hit.
+	if _, ok := importedModules[pkg.EcosystemName()]; ok {
+		return true
 	}
 	if _, ok := importedModules[pkg.Name]; ok {
 		return true
