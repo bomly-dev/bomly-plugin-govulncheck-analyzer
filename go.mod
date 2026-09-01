@@ -3,7 +3,7 @@ module github.com/bomly-dev/bomly-plugin-govulncheck-analyzer
 go 1.27.0
 
 require (
-	github.com/bomly-dev/bomly-sdk v0.7.0
+	github.com/bomly-dev/bomly-sdk v0.8.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/vuln v1.6.0
 )
