@@ -181,7 +181,7 @@ func mergeFinding(into map[string]Finding, modules map[string]struct{}, buildMod
 // The version is canonicalized through golang.org/x/mod/semver rather than
 // compared verbatim, because govulncheck reports what the build selected while
 // a graph node carries what the manifest recorded, and "v1.2" and "v1.2.0" are
-// the same module version. Delegating that judgement to the module system'"'"'s
+// the same module version. Delegating that judgement to the module system's
 // own library is the point; a string comparison here would be a second, worse
 // answer to a question x/mod already answers. Versions semver rejects
 // (a pseudo-version replacement, a "(devel)" main module) are kept verbatim so

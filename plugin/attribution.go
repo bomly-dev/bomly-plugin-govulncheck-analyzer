@@ -119,7 +119,7 @@ func (a rootAttributor) attribute(node *model.DependencyNode, root string) rootA
 			sitedInAnotherRoot = true
 		}
 	}
-	// Two ways to know the node is not ours, and both need the run'"'"'s own
+	// Two ways to know the node is not ours, and both need the run's own
 	// roots to say so. A site under another root this run analyzes is
 	// positive evidence of absence: the package is installed in a tree we
 	// know about and it is not this one. A site whose path is under no

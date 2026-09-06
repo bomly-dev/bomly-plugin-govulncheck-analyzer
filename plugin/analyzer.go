@@ -343,9 +343,9 @@ func withEvidence(current *model.Reachability, evidence model.ReachabilityEviden
 // It deliberately does not skip a vulnerability another module root already
 // annotated. That skip was the same first-root-wins loss phase 2.8 removes,
 // left standing in the failure path: with roots A and B, A succeeding with
-// "unreachable" and B'"'"'s runner failing, the skip dropped B entirely and the
+// "unreachable" and B's runner failing, the skip dropped B entirely and the
 // summary read "unreachable" for a workspace half of which was never looked
-// at. DeriveReachability requires every root to say unreachable, so B'"'"'s
+// at. DeriveReachability requires every root to say unreachable, so B's
 // unknown is exactly what keeps the aggregate honest -- but only if it is
 // recorded.
 func annotateModuleUnknown(req model.AnalyzeRequest, attributor rootAttributor, moduleRoot, reason string, now time.Time) int {
@@ -455,7 +455,7 @@ func isGoPackage(pkg *model.DependencyNode) bool {
 	return false
 }
 
-// attributeGoPackage layers govulncheck'"'"'s own attribution source on top of
+// attributeGoPackage layers govulncheck's own attribution source on top of
 // the site-based rule every analyzer shares.
 //
 // Go dependencies live in the module cache, not under the module root, so
@@ -463,8 +463,8 @@ func isGoPackage(pkg *model.DependencyNode) bool {
 // analyzed. govulncheck supplies what the paths cannot: the version minimal
 // version selection chose for each module in *this* build. A node whose module
 // path and version both match one was the copy analyzed here; a same-path node
-// at a different version belongs to another root'"'"'s build and must not be
-// named as this finding'"'"'s occurrence.
+// at a different version belongs to another root's build and must not be
+// named as this finding's occurrence.
 func attributeGoPackage(attributor rootAttributor, pkg *model.DependencyNode, moduleRoot string, buildModules map[string]string) rootAttribution {
 	attributed := attributor.attribute(pkg, moduleRoot)
 	if attributed != attributedToRootOnly {
@@ -486,7 +486,7 @@ func packageMatchesBuildModule(pkg *model.DependencyNode, buildModules map[strin
 	if version == "" {
 		return false
 	}
-	// EcosystemName is the SDK'"'"'s authority for the module path, for the same
+	// EcosystemName is the SDK's authority for the module path, for the same
 	// reason packageImportedByModule uses it: identity normalization splits
 	// "example.com/lib" into Org and Name, so pkg.Name alone is not a module
 	// path.
