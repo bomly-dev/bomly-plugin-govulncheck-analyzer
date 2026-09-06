@@ -99,6 +99,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 
 	overallStart := time.Now()
 	moduleRoots := discoverModuleRoots(req)
+	attributor := newRootAttributor(req.Graph, moduleRoots)
 	if len(moduleRoots) == 0 {
 		// No module roots discovered — annotate every Go vuln as
 		// Unknown so consumers know the analyzer was attempted.
@@ -122,7 +123,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 		case <-ctx.Done():
 			logger.Info("govulncheck: context cancelled; skipping module",
 				zap.String("module_root", root))
-			annotateModuleUnknown(req, root, "cancelled", time.Now())
+			annotateModuleUnknown(req, attributor, root, "cancelled", time.Now())
 			continue
 		default:
 		}
@@ -136,7 +137,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 				zap.Duration("duration", time.Since(moduleStart)),
 				zap.Error(err))
 			reason := failureReason(err)
-			added := annotateModuleUnknown(req, root, reason, time.Now())
+			added := annotateModuleUnknown(req, attributor, root, reason, time.Now())
 			stats.Unknown += added
 			continue
 		}
@@ -145,7 +146,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 		} else {
 			cacheMisses++
 		}
-		applied := applyRunnerResult(req, root, runResult, runner.Name(), time.Now())
+		applied := applyRunnerResult(req, attributor, root, runResult, runner.Name(), time.Now())
 		stats.Reachable += applied.reachable
 		stats.Unreachable += applied.unreachable
 		stats.Unknown += applied.unknown
@@ -255,14 +256,15 @@ type applyOutcome struct {
 // in govulncheck's output are marked as either TierPackage Unreachable
 // (module not imported) or TierSymbol Unreachable (imported but no call
 // path).
-func applyRunnerResult(req model.AnalyzeRequest, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
+func applyRunnerResult(req model.AnalyzeRequest, attributor rootAttributor, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
 	var outcome applyOutcome
 	timestamp := now.UTC().Format(time.RFC3339)
 	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
-		if !packageBelongsToModuleRoot(dep, moduleRoot) {
+		attributed := attributeGoPackage(attributor, dep, moduleRoot, runRes.BuildModules)
+		if attributed == attributedElsewhere {
 			continue
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
@@ -276,11 +278,16 @@ func applyRunnerResult(req model.AnalyzeRequest, moduleRoot string, runRes Runne
 			finding, hit := lookupFinding(runRes, vuln)
 			r := &model.ReachabilityEvidence{
 				ModuleRoot: moduleRoot,
-				// govulncheck resolves per Go module, so the finding is
-				// attributable to this exact occurrence node.
-				DependencyRefs: []string{dep.NodeID()},
-				Analyzer:       Name,
-				AnalyzedAt:     timestamp,
+				Analyzer:   Name,
+				AnalyzedAt: timestamp,
+			}
+			if attributed == attributedToSite {
+				// Named only when this occurrence was established for this
+				// root -- by a site the producer attributed, or by the module
+				// version govulncheck selected for this build. Otherwise the
+				// module root is the whole claim and the refs stay empty,
+				// which reads as "not stated" rather than "no occurrence".
+				r.DependencyRefs = []string{dep.NodeID()}
 			}
 			switch {
 			case hit && finding.CalledBy:
@@ -331,21 +338,28 @@ func withEvidence(current *model.Reachability, evidence model.ReachabilityEviden
 	return &summary
 }
 
-func annotateModuleUnknown(req model.AnalyzeRequest, moduleRoot, reason string, now time.Time) int {
+// annotateModuleUnknown records that one module root could not be analyzed.
+//
+// It deliberately does not skip a vulnerability another module root already
+// annotated. That skip was the same first-root-wins loss phase 2.8 removes,
+// left standing in the failure path: with roots A and B, A succeeding with
+// "unreachable" and B'"'"'s runner failing, the skip dropped B entirely and the
+// summary read "unreachable" for a workspace half of which was never looked
+// at. DeriveReachability requires every root to say unreachable, so B'"'"'s
+// unknown is exactly what keeps the aggregate honest -- but only if it is
+// recorded.
+func annotateModuleUnknown(req model.AnalyzeRequest, attributor rootAttributor, moduleRoot, reason string, now time.Time) int {
 	timestamp := now.UTC().Format(time.RFC3339)
 	count := 0
 	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
-		if !packageBelongsToModuleRoot(dep, moduleRoot) {
+		if attributor.attribute(dep, moduleRoot) == attributedElsewhere {
 			continue
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
 		for i := range vulns {
-			if vulns[i].Reachability != nil {
-				continue
-			}
 			// Recorded as evidence rather than as the whole answer: a
 			// module that could not be analyzed must not overwrite another
 			// module's finding, and it must stop an all-unreachable summary
@@ -372,16 +386,19 @@ func annotateAllUnknown(req model.AnalyzeRequest, reason string, now time.Time) 
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
 		for i := range vulns {
-			if vulns[i].Reachability != nil {
-				continue
-			}
-			vulns[i].Reachability = &model.Reachability{
+			// One evidence record with no module root, which the SDK reads as
+			// a whole-scan claim covering every site. Writing a bare
+			// annotation instead would leave consumers with an answer they
+			// cannot join to anything, and a reader cannot tell an empty
+			// evidence list meaning "nothing was recorded" from one meaning
+			// "no root was found".
+			vulns[i].Reachability = withEvidence(vulns[i].Reachability, model.ReachabilityEvidence{
 				Analyzer:   Name,
 				Status:     model.ReachabilityUnknown,
 				Tier:       model.TierNone,
 				Reason:     reason,
 				AnalyzedAt: timestamp,
-			}
+			}, timestamp)
 		}
 	}
 }
@@ -438,28 +455,50 @@ func isGoPackage(pkg *model.DependencyNode) bool {
 	return false
 }
 
-// packageBelongsToModuleRoot is a best-effort attribution. govulncheck
-// runs per-module, so any Go package physically located under moduleRoot
-// (or with no recorded location) is treated as belonging to it. In
-// multi-module repos this may over-attribute; the second pass through
-// applyRunnerResult skips already-annotated vulns to avoid double-counting.
-func packageBelongsToModuleRoot(pkg *model.DependencyNode, moduleRoot string) bool {
-	if pkg == nil {
+// attributeGoPackage layers govulncheck'"'"'s own attribution source on top of
+// the site-based rule every analyzer shares.
+//
+// Go dependencies live in the module cache, not under the module root, so
+// declaration-site paths rarely pin a Go occurrence to the root being
+// analyzed. govulncheck supplies what the paths cannot: the version minimal
+// version selection chose for each module in *this* build. A node whose module
+// path and version both match one was the copy analyzed here; a same-path node
+// at a different version belongs to another root'"'"'s build and must not be
+// named as this finding'"'"'s occurrence.
+func attributeGoPackage(attributor rootAttributor, pkg *model.DependencyNode, moduleRoot string, buildModules map[string]string) rootAttribution {
+	attributed := attributor.attribute(pkg, moduleRoot)
+	if attributed != attributedToRootOnly {
+		return attributed
+	}
+	if packageMatchesBuildModule(pkg, buildModules) {
+		return attributedToSite
+	}
+	return attributed
+}
+
+// packageMatchesBuildModule reports whether pkg is the exact module version
+// govulncheck resolved for this build.
+func packageMatchesBuildModule(pkg *model.DependencyNode, buildModules map[string]string) bool {
+	if pkg == nil || len(buildModules) == 0 {
 		return false
 	}
-	if len(pkg.Locations) == 0 {
-		return true
+	version := canonicalModuleVersion(pkg.Version)
+	if version == "" {
+		return false
 	}
-	for _, loc := range pkg.Locations {
-		path := loc.RealPath
-		if path == "" {
+	// EcosystemName is the SDK'"'"'s authority for the module path, for the same
+	// reason packageImportedByModule uses it: identity normalization splits
+	// "example.com/lib" into Org and Name, so pkg.Name alone is not a module
+	// path.
+	for _, candidate := range []string{pkg.EcosystemName(), pkg.Name, pkg.QualifiedName()} {
+		if candidate == "" {
 			continue
 		}
-		if pathContainsRoot(path, moduleRoot) {
-			return true
+		if built, ok := buildModules[candidate]; ok {
+			return built == version
 		}
 	}
-	return true
+	return false
 }
 
 func pathContainsRoot(path, root string) bool {

@@ -8,6 +8,7 @@ import (
 
 	model "github.com/bomly-dev/bomly-sdk"
 	"go.uber.org/zap"
+	"golang.org/x/mod/semver"
 )
 
 // govulncheck -json emits a stream of single-key envelopes. Each line is
@@ -60,6 +61,7 @@ func parseGovulncheckJSON(data []byte) (RunnerResult, error) {
 	result := RunnerResult{
 		Findings:        make(map[string]Finding),
 		ImportedModules: make(map[string]struct{}),
+		BuildModules:    make(map[string]string),
 	}
 	osvAliases := make(map[string][]string)
 	osvSummaries := make(map[string]string)
@@ -88,7 +90,7 @@ func parseGovulncheckJSON(data []byte) (RunnerResult, error) {
 		if env.Finding == nil || env.Finding.OSV == "" {
 			continue
 		}
-		mergeFinding(result.Findings, result.ImportedModules, *env.Finding)
+		mergeFinding(result.Findings, result.ImportedModules, result.BuildModules, *env.Finding)
 	}
 	if err := scanner.Err(); err != nil {
 		return RunnerResult{}, fmt.Errorf("scan govulncheck JSON stream: %w", err)
@@ -101,7 +103,7 @@ func parseGovulncheckJSON(data []byte) (RunnerResult, error) {
 	return result, nil
 }
 
-func mergeFinding(into map[string]Finding, modules map[string]struct{}, src findingEntry) {
+func mergeFinding(into map[string]Finding, modules map[string]struct{}, buildModules map[string]string, src findingEntry) {
 	current := into[src.OSV]
 	current.OSV = src.OSV
 	if src.FixedVersion != "" && current.FixedIn == "" {
@@ -120,6 +122,10 @@ func mergeFinding(into map[string]Finding, modules map[string]struct{}, src find
 	// frame is the entry point. Module-level findings carry a single frame
 	// with only a module; package-level findings a single frame with module
 	// and package but no symbol.
+	for _, t := range src.Trace {
+		recordBuildModule(buildModules, t)
+	}
+
 	sink := src.Trace[0]
 	if sink.Module != "" {
 		current.Modules = appendUnique(current.Modules, sink.Module)
@@ -165,6 +171,39 @@ func mergeFinding(into map[string]Finding, modules map[string]struct{}, src find
 		// and nothing else.
 	}
 	into[src.OSV] = current
+}
+
+// recordBuildModule keeps the version govulncheck reported for a module in
+// this build. Every frame is considered, not only the sink: a call path names
+// the intermediate modules too, and each of those is a module whose version
+// this build selected.
+//
+// The version is canonicalized through golang.org/x/mod/semver rather than
+// compared verbatim, because govulncheck reports what the build selected while
+// a graph node carries what the manifest recorded, and "v1.2" and "v1.2.0" are
+// the same module version. Delegating that judgement to the module system'"'"'s
+// own library is the point; a string comparison here would be a second, worse
+// answer to a question x/mod already answers. Versions semver rejects
+// (a pseudo-version replacement, a "(devel)" main module) are kept verbatim so
+// an exact match still works and a non-match still declines to attribute.
+func recordBuildModule(buildModules map[string]string, t traceEntry) {
+	if buildModules == nil || t.Module == "" || t.Version == "" {
+		return
+	}
+	if _, ok := buildModules[t.Module]; ok {
+		return
+	}
+	buildModules[t.Module] = canonicalModuleVersion(t.Version)
+}
+
+// canonicalModuleVersion returns the canonical form of a Go module version,
+// falling back to the trimmed input when semver does not recognize it.
+func canonicalModuleVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if canonical := semver.Canonical(version); canonical != "" {
+		return canonical
+	}
+	return version
 }
 
 func positionToSDK(p *position) model.SourcePosition {

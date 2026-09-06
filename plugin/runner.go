@@ -39,6 +39,18 @@ type RunnerResult struct {
 	// package-level reachability ("imported but no symbol called") from
 	// "not imported at all".
 	ImportedModules map[string]struct{}
+	// BuildModules is the version govulncheck saw for each module named in
+	// this build's traces, keyed by module path.
+	//
+	// It is what lets this analyzer attribute a finding to an exact
+	// occurrence node rather than only to the module root: minimal version
+	// selection gives one build one version per module, so a graph node whose
+	// module path and version both match was demonstrably the copy analyzed
+	// here — while a same-path node at another version belongs to some other
+	// module root's build and must not be named. Modules absent from every
+	// trace are absent from this map, and evidence about them stays at
+	// module-root granularity, which is "not stated", not "no occurrence".
+	BuildModules map[string]string
 }
 
 // Finding captures one vulnerability govulncheck found in the module
