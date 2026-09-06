@@ -54,6 +54,11 @@ const (
 // the finding entirely. So a non-match only means "not ours" once at least one
 // declared root in the graph is a root this run analyzes.
 type rootAttributor struct {
+	// analyzed is every root this run covers, cleaned. A site that lies under
+	// one of these but not under the root in hand is positive evidence of
+	// absence -- the package is installed in a tree this run knows about, and
+	// that tree is not this one.
+	analyzed map[string]struct{}
 	// trustDeclaredRoots is set when producer-recorded roots and analyzed
 	// roots overlap, which is what licenses reading a non-match as absence.
 	trustDeclaredRoots bool
@@ -62,14 +67,15 @@ type rootAttributor struct {
 // newRootAttributor calibrates attribution against the roots this run will
 // analyze and the sites the graph actually records.
 func newRootAttributor(graph *model.Graph, roots []string) rootAttributor {
-	if graph == nil || len(roots) == 0 {
-		return rootAttributor{}
-	}
 	analyzed := make(map[string]struct{}, len(roots))
 	for _, root := range roots {
 		if cleaned := cleanRoot(root); cleaned != "" {
 			analyzed[cleaned] = struct{}{}
 		}
+	}
+	attributor := rootAttributor{analyzed: analyzed}
+	if graph == nil || len(analyzed) == 0 {
+		return attributor
 	}
 	for _, node := range graph.DependencyNodes() {
 		if node == nil {
@@ -81,11 +87,12 @@ func newRootAttributor(graph *model.Graph, roots []string) rootAttributor {
 				continue
 			}
 			if _, ok := analyzed[declared]; ok {
-				return rootAttributor{trustDeclaredRoots: true}
+				attributor.trustDeclaredRoots = true
+				return attributor
 			}
 		}
 	}
-	return rootAttributor{}
+	return attributor
 }
 
 // attribute reports how firmly node's sites tie it to root.
@@ -94,7 +101,7 @@ func (a rootAttributor) attribute(node *model.DependencyNode, root string) rootA
 		return attributedElsewhere
 	}
 	target := cleanRoot(root)
-	declaredAnyRoot := false
+	declaredAnyRoot, sitedInAnotherRoot := false, false
 	for _, location := range node.Locations {
 		if declared := cleanRoot(location.ModuleRoot); declared != "" {
 			declaredAnyRoot = true
@@ -102,17 +109,36 @@ func (a rootAttributor) attribute(node *model.DependencyNode, root string) rootA
 				return attributedToSite
 			}
 		}
-		if location.RealPath != "" && target != "" && pathContainsRoot(location.RealPath, target) {
+		if location.RealPath == "" {
+			continue
+		}
+		if target != "" && pathContainsRoot(location.RealPath, target) {
 			return attributedToSite
 		}
+		if a.sitedInAnalyzedRoot(location.RealPath) {
+			sitedInAnotherRoot = true
+		}
 	}
-	// The producer attributed its sites in a vocabulary this run shares, and
-	// none of them is this root. That is a real absence, so the node
-	// contributes nothing here.
-	if declaredAnyRoot && a.trustDeclaredRoots {
+	// Two ways to know the node is not ours, and both need the run'"'"'s own
+	// roots to say so. A site under another root this run analyzes is
+	// positive evidence of absence: the package is installed in a tree we
+	// know about and it is not this one. A site whose path is under no
+	// analyzed root at all -- a module cache, a global store -- says nothing
+	// either way and must not be read as absence.
+	if sitedInAnotherRoot || (declaredAnyRoot && a.trustDeclaredRoots) {
 		return attributedElsewhere
 	}
 	return attributedToRootOnly
+}
+
+// sitedInAnalyzedRoot reports whether path lies under any root this run covers.
+func (a rootAttributor) sitedInAnalyzedRoot(path string) bool {
+	for root := range a.analyzed {
+		if pathContainsRoot(path, root) {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanRoot normalizes a module root for comparison. Empty in, empty out —

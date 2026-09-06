@@ -131,6 +131,48 @@ func TestEvidenceIsKeyedByTheModuleRootThatEstablishedIt(t *testing.T) {
 	}
 }
 
+// TestVendoredSiteUnderAnotherRootIsNotOurs covers the path half of the
+// exclusion, independently of declared roots. A vendored dependency lives
+// inside the module that vendored it, so its path alone says which root it
+// belongs to — and a site under another root this run analyzes is positive
+// evidence of absence here.
+func TestVendoredSiteUnderAnotherRootIsNotOurs(t *testing.T) {
+	workspace := t.TempDir()
+	apiRoot := goModuleDirNamed(t, workspace, "api")
+	webRoot := goModuleDirNamed(t, workspace, "web")
+
+	// Neither node declares a module root, so only its vendored path can say
+	// which module it belongs to. Both roots are vendored into, so both are
+	// discovered and both passes run.
+	apiDep := goNodeIn(t, "example.com/apilib", "v1.0.0", apiRoot, false)
+	apiDep.Locations = []model.PackageLocation{{
+		RealPath: filepath.Join(apiRoot, "vendor", "example.com", "apilib", "lib.go"),
+	}}
+	webDep := goNodeIn(t, "example.com/weblib", "v2.0.0", webRoot, false)
+	webDep.Locations = []model.PackageLocation{{
+		RealPath: filepath.Join(webRoot, "vendor", "example.com", "weblib", "lib.go"),
+	}}
+	g, registry := graphWithVulns(t, []*model.DependencyNode{apiDep, webDep}, []string{"GO-2024-1", "GO-2024-2"})
+
+	a := Analyzer{DisableCache: true, Runner: &mapRunner{results: map[string]RunnerResult{
+		apiRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
+		webRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
+	}}}
+	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	for _, tc := range []struct {
+		dep  *model.DependencyNode
+		want string
+	}{{apiDep, apiRoot}, {webDep, webRoot}} {
+		roots := evidenceRoots(reachabilityFor(t, registry, tc.dep.PackageRef))
+		if len(roots) != 1 || roots[0] != tc.want {
+			t.Errorf("%s evidence roots = %v, want exactly [%s]: a vendored copy belongs to the module that vendored it", tc.dep.Name, roots, tc.want)
+		}
+	}
+}
+
 // TestBuildModuleVersionNamesTheExactOccurrence pins govulncheck's own
 // attribution source. Two roots can build two versions of one module; the
 // version govulncheck reported for this build is what says which occurrence
