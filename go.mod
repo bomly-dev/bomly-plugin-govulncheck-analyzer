@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/bomly-dev/bomly-sdk v0.9.3
 	go.uber.org/zap v1.28.0
+	golang.org/x/mod v0.38.0
 	golang.org/x/vuln v1.6.0
 )
 
@@ -24,7 +25,6 @@ require (
 	github.com/package-url/packageurl-go v0.1.7 // indirect
 	github.com/spdx/tools-golang v0.6.0-rc4 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
