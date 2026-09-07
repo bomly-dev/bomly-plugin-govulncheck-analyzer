@@ -314,16 +314,16 @@ func TestAttributorCalibratesOnOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	shared := newRootAttributor(g, []string{"/ws/api", "/ws/web"})
-	if got := shared.attribute(node, "/ws/api"); got != attributedToSite {
-		t.Errorf("attribute(own root) = %v, want attributedToSite", got)
+	shared := model.NewRootAttributor([]string{"/ws/api", "/ws/web"}, g)
+	if got := shared.Attribute(node, "/ws/api"); got != model.AttributedToSite {
+		t.Errorf("attribute(own root) = %v, want attributed-to-site", got)
 	}
-	if got := shared.attribute(node, "/ws/web"); got != attributedElsewhere {
-		t.Errorf("attribute(other root) = %v, want attributedElsewhere", got)
+	if got := shared.Attribute(node, "/ws/web"); got != model.AttributedElsewhere {
+		t.Errorf("attribute(other root) = %v, want attributed-elsewhere", got)
 	}
 
-	foreign := newRootAttributor(g, []string{"/other/one", "/other/two"})
-	if got := foreign.attribute(node, "/other/one"); got != attributedToRootOnly {
-		t.Errorf("attribute under a foreign vocabulary = %v, want attributedToRootOnly", got)
+	foreign := model.NewRootAttributor([]string{"/other/one", "/other/two"}, g)
+	if got := foreign.Attribute(node, "/other/one"); got != model.AttributedToRootOnly {
+		t.Errorf("attribute under a foreign vocabulary = %v, want attributed-to-root-only", got)
 	}
 }

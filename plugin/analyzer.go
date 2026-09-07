@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -99,7 +98,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 
 	overallStart := time.Now()
 	moduleRoots := discoverModuleRoots(req)
-	attributor := newRootAttributor(req.Graph, moduleRoots)
+	attributor := model.NewRootAttributor(moduleRoots, req.Graph)
 	if len(moduleRoots) == 0 {
 		// No module roots discovered — annotate every Go vuln as
 		// Unknown so consumers know the analyzer was attempted.
@@ -256,7 +255,7 @@ type applyOutcome struct {
 // in govulncheck's output are marked as either TierPackage Unreachable
 // (module not imported) or TierSymbol Unreachable (imported but no call
 // path).
-func applyRunnerResult(req model.AnalyzeRequest, attributor rootAttributor, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
+func applyRunnerResult(req model.AnalyzeRequest, attributor model.RootAttributor, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
 	var outcome applyOutcome
 	timestamp := now.UTC().Format(time.RFC3339)
 	for _, dep := range req.Graph.DependencyNodes() {
@@ -264,7 +263,7 @@ func applyRunnerResult(req model.AnalyzeRequest, attributor rootAttributor, modu
 			continue
 		}
 		attributed := attributeGoPackage(attributor, dep, moduleRoot, runRes.BuildModules)
-		if attributed == attributedElsewhere {
+		if attributed == model.AttributedElsewhere {
 			continue
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
@@ -281,7 +280,7 @@ func applyRunnerResult(req model.AnalyzeRequest, attributor rootAttributor, modu
 				Analyzer:   Name,
 				AnalyzedAt: timestamp,
 			}
-			if attributed == attributedToSite {
+			if attributed == model.AttributedToSite {
 				// Named only when this occurrence was established for this
 				// root -- by a site the producer attributed, or by the module
 				// version govulncheck selected for this build. Otherwise the
@@ -348,14 +347,14 @@ func withEvidence(current *model.Reachability, evidence model.ReachabilityEviden
 // at. DeriveReachability requires every root to say unreachable, so B's
 // unknown is exactly what keeps the aggregate honest -- but only if it is
 // recorded.
-func annotateModuleUnknown(req model.AnalyzeRequest, attributor rootAttributor, moduleRoot, reason string, now time.Time) int {
+func annotateModuleUnknown(req model.AnalyzeRequest, attributor model.RootAttributor, moduleRoot, reason string, now time.Time) int {
 	timestamp := now.UTC().Format(time.RFC3339)
 	count := 0
 	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
-		if attributor.attribute(dep, moduleRoot) == attributedElsewhere {
+		if attributor.Attribute(dep, moduleRoot) == model.AttributedElsewhere {
 			continue
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
@@ -465,13 +464,13 @@ func isGoPackage(pkg *model.DependencyNode) bool {
 // path and version both match one was the copy analyzed here; a same-path node
 // at a different version belongs to another root's build and must not be
 // named as this finding's occurrence.
-func attributeGoPackage(attributor rootAttributor, pkg *model.DependencyNode, moduleRoot string, buildModules map[string]string) rootAttribution {
-	attributed := attributor.attribute(pkg, moduleRoot)
-	if attributed != attributedToRootOnly {
+func attributeGoPackage(attributor model.RootAttributor, pkg *model.DependencyNode, moduleRoot string, buildModules map[string]string) model.RootAttribution {
+	attributed := attributor.Attribute(pkg, moduleRoot)
+	if attributed != model.AttributedToRootOnly {
 		return attributed
 	}
 	if packageMatchesBuildModule(pkg, buildModules) {
-		return attributedToSite
+		return model.AttributedToSite
 	}
 	return attributed
 }
@@ -499,16 +498,6 @@ func packageMatchesBuildModule(pkg *model.DependencyNode, buildModules map[strin
 		}
 	}
 	return false
-}
-
-func pathContainsRoot(path, root string) bool {
-	cleanPath := filepath.Clean(path)
-	cleanRoot := filepath.Clean(root)
-	rel, err := filepath.Rel(cleanRoot, cleanPath)
-	if err != nil {
-		return false
-	}
-	return !strings.HasPrefix(rel, "..")
 }
 
 func packageImportedByModule(pkg *model.DependencyNode, importedModules map[string]struct{}) bool {
