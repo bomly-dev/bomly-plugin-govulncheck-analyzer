@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	model "github.com/bomly-dev/bomly-sdk"
 	"go.uber.org/zap"
@@ -160,5 +161,43 @@ func TestNewResultCacheWarnsWhenInitFails(t *testing.T) {
 	}
 	if got := logs.FilterLevelExact(zap.WarnLevel).Len(); got != 1 {
 		t.Fatalf("expected exactly one WARN log, got %d: %v", got, logs.All())
+	}
+}
+
+// A cache hit must answer the same question a fresh run answers.
+//
+// BuildModules is what names the exact occurrence a finding is about, and the
+// cached shape did not carry it: the same scan emitted an exact DependencyRefs
+// or none depending only on whether the entry was warm.
+func TestBuildModulesSurviveTheCacheRoundTrip(t *testing.T) {
+	c := newResultCache(t.TempDir(), time.Hour, nil)
+	if c == nil {
+		t.Fatal("cache could not be created")
+	}
+	dir := goModuleDirNamed(t, t.TempDir(), "api")
+	want := RunnerResult{
+		Findings:        map[string]Finding{},
+		ImportedModules: map[string]struct{}{"example.com/lib": {}},
+		BuildModules:    map[string]string{"example.com/lib": "v1.0.0"},
+	}
+	if err := c.set(dir, "govulncheck", want); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, ok := c.get(dir, "govulncheck")
+	if !ok {
+		t.Fatal("cache miss straight after a write")
+	}
+	if len(got.BuildModules) != 1 || got.BuildModules["example.com/lib"] != "v1.0.0" {
+		t.Errorf("build modules = %v, want the written map; a warm run would lose the exact occurrence",
+			got.BuildModules)
+	}
+}
+
+// The schema version gates the field. A v1 entry predates BuildModules, and
+// reading one as though the build selected nothing would make a stale cache
+// quietly downgrade attribution rather than miss.
+func TestCacheSchemaVersionCoversTheAttributionField(t *testing.T) {
+	if cacheSchemaVersion == "v1" {
+		t.Error("BuildModules was added to the cached shape without bumping cacheSchemaVersion")
 	}
 }
