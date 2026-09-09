@@ -469,21 +469,46 @@ func attributeGoPackage(attributor model.RootAttributor, pkg *model.DependencyNo
 	if attributed != model.AttributedToRootOnly {
 		return attributed
 	}
-	if packageMatchesBuildModule(pkg, buildModules) {
+	switch matchBuildModule(pkg, buildModules) {
+	case buildModuleSelected:
 		return model.AttributedToSite
+	case buildModuleOtherVersion:
+		// Positive evidence, not an absence. The trace names this module path
+		// and names a different version for it, so minimal version selection
+		// put some other copy in this build and this node is not it. Falling
+		// through to root-only let that node inherit the finding anyway --
+		// lookupFinding keys on the advisory ID alone, so a v2 node picked up
+		// a reachable verdict produced by a build that selected v1.
+		return model.AttributedElsewhere
 	}
 	return attributed
 }
 
-// packageMatchesBuildModule reports whether pkg is the exact module version
-// govulncheck resolved for this build.
-func packageMatchesBuildModule(pkg *model.DependencyNode, buildModules map[string]string) bool {
+// buildModuleMatch is what govulncheck's build-module trace says about a node.
+//
+// The three answers are distinct on purpose: absent from the trace is silence,
+// while present at another version is evidence against this node belonging to
+// this build.
+type buildModuleMatch int
+
+const (
+	buildModuleAbsent buildModuleMatch = iota
+	buildModuleSelected
+	buildModuleOtherVersion
+)
+
+// matchBuildModule reports what the build-module trace says about pkg: that it
+// is the version minimal version selection chose, that the same module path
+// was selected at a different version, or that the path is absent entirely.
+func matchBuildModule(pkg *model.DependencyNode, buildModules map[string]string) buildModuleMatch {
 	if pkg == nil || len(buildModules) == 0 {
-		return false
+		return buildModuleAbsent
 	}
 	version := canonicalModuleVersion(pkg.Version)
 	if version == "" {
-		return false
+		// Without a comparable version nothing can be concluded either way,
+		// which is silence rather than evidence.
+		return buildModuleAbsent
 	}
 	// EcosystemName is the SDK's authority for the module path, for the same
 	// reason packageImportedByModule uses it: identity normalization splits
@@ -494,10 +519,13 @@ func packageMatchesBuildModule(pkg *model.DependencyNode, buildModules map[strin
 			continue
 		}
 		if built, ok := buildModules[candidate]; ok {
-			return built == version
+			if built == version {
+				return buildModuleSelected
+			}
+			return buildModuleOtherVersion
 		}
 	}
-	return false
+	return buildModuleAbsent
 }
 
 func packageImportedByModule(pkg *model.DependencyNode, importedModules map[string]struct{}) bool {

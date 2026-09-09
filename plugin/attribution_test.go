@@ -209,15 +209,18 @@ func TestBuildModuleVersionNamesTheExactOccurrence(t *testing.T) {
 		t.Errorf("built node refs = %v, want [%s]", got, built.NodeID())
 	}
 
-	otherEvidence := reachabilityFor(t, registry, other.PackageRef).Evidence
-	if len(otherEvidence) != 1 {
-		t.Fatalf("other node evidence = %d entries, want 1", len(otherEvidence))
-	}
-	if got := otherEvidence[0].DependencyRefs; len(got) != 0 {
-		t.Errorf("refs = %v for a version this build did not select; the module root is the whole claim", got)
-	}
-	if otherEvidence[0].ModuleRoot != root {
-		t.Errorf("module root = %q, want %q: the floor is mandatory even without refs", otherEvidence[0].ModuleRoot, root)
+	// The v2 node gets nothing from this root, not root-only evidence.
+	//
+	// The trace names example.com/lib at v1.0.0, so minimal version selection
+	// put v1 in this build and v2 is some other root's copy -- that is
+	// evidence against this node, not silence about it. Recording root-only
+	// evidence here was the defect: lookupFinding keys on the advisory ID
+	// alone, so the v2 node inherited the reachable verdict the v1 build
+	// produced. Absent evidence reads as "not established here", which is the
+	// honest answer for a copy this build never compiled.
+	if other := reachabilityFor(t, registry, other.PackageRef); other != nil && len(other.Evidence) != 0 {
+		t.Errorf("evidence = %+v for a version this build did not select; the node belongs to another build",
+			other.Evidence)
 	}
 }
 

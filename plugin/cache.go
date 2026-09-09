@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"time"
 
 	cachepkg "github.com/bomly-dev/bomly-sdk/filecache"
@@ -19,7 +20,7 @@ import (
 // cacheSchemaVersion bumps whenever the on-disk cache layout changes in a
 // way that would silently produce wrong results. Bumping invalidates every
 // previously cached entry.
-const cacheSchemaVersion = "v1"
+const cacheSchemaVersion = "v2"
 
 // defaultCacheTTL is the per-module result lifetime. govulncheck output
 // changes when the vuln database updates, so we don't keep entries for
@@ -44,6 +45,14 @@ type resultCache struct {
 type cachedRunnerResult struct {
 	Findings        map[string]Finding `json:"findings,omitempty"`
 	ImportedModules []string           `json:"imported_modules,omitempty"`
+	// BuildModules is the version minimal version selection chose for each
+	// module in this build. It has to survive the round trip: it is what names
+	// the exact occurrence a finding is about, so a cache hit without it
+	// answered the same question less precisely than a fresh run -- the same
+	// scan emitting an exact DependencyRefs or none depending only on whether
+	// the entry was warm. v2 exists for this field; a v1 entry predates it and
+	// must not be read as "this build selected nothing".
+	BuildModules map[string]string `json:"build_modules,omitempty"`
 }
 
 // newResultCache constructs a result cache rooted at dir. If dir is
@@ -141,7 +150,11 @@ func (c *resultCache) get(moduleDir, runnerName string) (RunnerResult, bool) {
 	for _, m := range cached.ImportedModules {
 		imported[m] = struct{}{}
 	}
-	return RunnerResult{Findings: cached.Findings, ImportedModules: imported}, true
+	return RunnerResult{
+		Findings:        cached.Findings,
+		ImportedModules: imported,
+		BuildModules:    cached.BuildModules,
+	}, true
 }
 
 // set writes the runner result to the cache. A non-nil error is
@@ -158,9 +171,13 @@ func (c *resultCache) set(moduleDir, runnerName string, result RunnerResult) err
 	for m := range result.ImportedModules {
 		imported = append(imported, m)
 	}
+	// Sorted, as the type's comment has always said: map iteration is random,
+	// so without this the same result serialized to different bytes each run.
+	sort.Strings(imported)
 	cached := cachedRunnerResult{
 		Findings:        result.Findings,
 		ImportedModules: imported,
+		BuildModules:    result.BuildModules,
 	}
 	return cachepkg.Set(c.store, key, cached)
 }
