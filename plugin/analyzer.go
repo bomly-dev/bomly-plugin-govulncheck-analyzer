@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -426,10 +427,8 @@ func lookupFinding(r RunnerResult, vuln *model.Vulnerability) (Finding, bool) {
 			if alias == vuln.ID {
 				return f, true
 			}
-			for _, vulnAlias := range vuln.Aliases {
-				if alias == vulnAlias {
-					return f, true
-				}
+			if slices.Contains(vuln.Aliases, alias) {
+				return f, true
 			}
 		}
 	}
