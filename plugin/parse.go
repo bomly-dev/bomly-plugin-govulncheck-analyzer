@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	model "github.com/bomly-dev/bomly-sdk"
@@ -136,8 +137,7 @@ func mergeFinding(into map[string]Finding, modules map[string]struct{}, buildMod
 	// The SDK's CallPath contract is entry point → sink (Frames[0] is the
 	// entry point), the reverse of govulncheck's trace order.
 	frames := make([]model.CallFrame, 0, len(src.Trace))
-	for i := len(src.Trace) - 1; i >= 0; i-- {
-		t := src.Trace[i]
+	for _, t := range slices.Backward(src.Trace) {
 		if t.Module != "" && t.Package != "" {
 			modules[t.Module] = struct{}{}
 		}
@@ -224,10 +224,8 @@ func symbolKind(t traceEntry) model.SymbolKind {
 }
 
 func appendUnique(values []string, candidate string) []string {
-	for _, v := range values {
-		if v == candidate {
-			return values
-		}
+	if slices.Contains(values, candidate) {
+		return values
 	}
 	return append(values, candidate)
 }
