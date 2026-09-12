@@ -5,8 +5,8 @@ go 1.27.0
 require (
 	github.com/bomly-dev/bomly-sdk v0.10.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/mod v0.38.0
-	golang.org/x/vuln v1.6.0
+	golang.org/x/mod v0.41.0
+	golang.org/x/vuln v1.8.0
 )
 
 require (
@@ -25,12 +25,12 @@ require (
 	github.com/package-url/packageurl-go v0.1.7 // indirect
 	github.com/spdx/tools-golang v0.6.0-rc4 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
-	golang.org/x/text v0.41.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/tools v0.50.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
