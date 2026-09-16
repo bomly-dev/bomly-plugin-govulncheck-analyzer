@@ -3,7 +3,7 @@ package plugin
 import (
 	"testing"
 
-	model "github.com/bomly-dev/bomly-sdk"
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
 )
 
 const sampleGovulncheckJSON = `
@@ -42,7 +42,7 @@ func TestParseGovulncheckJSONStreamCollapsesTracesPerOSV(t *testing.T) {
 	if first.Symbols[0].Symbol != "Decode" || first.Symbols[0].Package != "github.com/foo/bar" {
 		t.Errorf("unexpected sink symbol: %+v", first.Symbols[0])
 	}
-	wantPos := model.SourcePosition{File: "main.go", Line: 12, Column: 4}
+	wantPos := sdkmodel.SourcePosition{File: "main.go", Line: 12, Column: 4}
 	if first.CallPaths[0].Frames[0].Position != wantPos {
 		t.Errorf("frame position = %+v, want %+v", first.CallPaths[0].Frames[0].Position, wantPos)
 	}

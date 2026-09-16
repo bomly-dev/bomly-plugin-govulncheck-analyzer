@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"go.uber.org/zap"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 // Name is the analyzer's stable identifier (used in selectors and output).
@@ -36,26 +38,26 @@ type Analyzer struct {
 }
 
 // Descriptor returns the registration metadata for the govulncheck analyzer.
-func (a Analyzer) Descriptor() model.AnalyzerDescriptor {
-	return model.AnalyzerDescriptor{
+func (a Analyzer) Descriptor() sdkplugin.AnalyzerDescriptor {
+	return sdkplugin.AnalyzerDescriptor{
 		Name:                Name,
-		SupportedEcosystems: []model.Ecosystem{model.EcosystemGo},
-		SupportedManagers:   []model.PackageManager{model.PackageManagerGoMod},
-		SupportedLanguages:  []model.Language{model.LanguageGo},
-		SupportedTiers:      []model.ReachabilityTier{model.TierSymbol, model.TierPackage},
-		Capabilities:        []string{model.CapabilityPackageUpdates},
+		SupportedEcosystems: []sdkmodel.Ecosystem{sdkmodel.EcosystemGo},
+		SupportedManagers:   []sdkmodel.PackageManager{sdkmodel.PackageManagerGoMod},
+		SupportedLanguages:  []sdkmodel.Language{sdkmodel.LanguageGo},
+		SupportedTiers:      []sdkmodel.ReachabilityTier{sdkmodel.TierSymbol, sdkmodel.TierPackage},
+		Capabilities:        []string{sdkplugin.CapabilityPackageUpdates},
 	}
 }
 
 // Ready reports whether the analyzer is callable. Always true; the runner
 // surfaces missing-toolchain errors at Run time as Status=Unknown rather
 // than blocking applicability.
-func (a Analyzer) Ready(context.Context, model.AnalyzeRequest) error { return nil }
+func (a Analyzer) Ready(context.Context, sdkplugin.AnalyzeRequest) error { return nil }
 
 // Applicable reports whether the request graph contains at least one Go
 // package with attached vulnerabilities. Without vulnerabilities to
 // annotate, the analyzer would do work without producing output.
-func (a Analyzer) Applicable(_ context.Context, req model.AnalyzeRequest) (bool, error) {
+func (a Analyzer) Applicable(_ context.Context, req sdkplugin.AnalyzeRequest) (bool, error) {
 	if req.Graph == nil || req.Registry == nil {
 		return false, nil
 	}
@@ -73,7 +75,7 @@ func (a Analyzer) Applicable(_ context.Context, req model.AnalyzeRequest) (bool,
 }
 
 // dependencyPURL returns the registry key for a dependency node.
-func dependencyPURL(dep *model.DependencyNode) string {
+func dependencyPURL(dep *sdkmodel.DependencyNode) string {
 	if dep == nil {
 		return ""
 	}
@@ -87,10 +89,10 @@ func dependencyPURL(dep *model.DependencyNode) string {
 // onto every Go registry vulnerability in the graph. Errors degrade to
 // Status=Unknown with a stable Reason — the engine relies on this to
 // keep the pipeline running.
-func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.AnalyzeResult, error) {
+func (a Analyzer) Analyze(ctx context.Context, req sdkplugin.AnalyzeRequest) (sdkplugin.AnalyzeResult, error) {
 	logger := a.logger()
 	if req.Graph == nil || req.Registry == nil {
-		return model.AnalyzeResult{}, nil
+		return sdkplugin.AnalyzeResult{}, nil
 	}
 	runner := a.Runner
 	if runner == nil {
@@ -99,7 +101,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 
 	overallStart := time.Now()
 	moduleRoots := discoverModuleRoots(req)
-	attributor := model.NewRootAttributor(moduleRoots, req.Graph)
+	attributor := sdkmodel.NewRootAttributor(moduleRoots, req.Graph)
 	if len(moduleRoots) == 0 {
 		// No module roots discovered — annotate every Go vuln as
 		// Unknown so consumers know the analyzer was attempted.
@@ -116,7 +118,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 	logger.Debug("govulncheck: discovered module roots", zap.Strings("paths", moduleRoots))
 
 	cache := a.cache()
-	stats := model.ReachabilityStats{}
+	stats := sdkplugin.ReachabilityStats{}
 	cacheHits, cacheMisses := 0, 0
 	for _, root := range moduleRoots {
 		select {
@@ -173,7 +175,7 @@ func (a Analyzer) Analyze(ctx context.Context, req model.AnalyzeRequest) (model.
 	)
 
 	out := resultFromRequest(req)
-	out.AnalyzerStats = map[string]model.ReachabilityStats{Name: stats}
+	out.AnalyzerStats = map[string]sdkplugin.ReachabilityStats{Name: stats}
 	return finishResult(req, out), nil
 }
 
@@ -229,13 +231,13 @@ func (a Analyzer) logger() *zap.Logger { return ensureLogger(a.Logger) }
 // annotated) request registry plus this analyzer's run marker. Returning
 // the registry keeps annotations visible across a managed-plugin process
 // boundary, where in-place mutation of req.Registry is not.
-func resultFromRequest(req model.AnalyzeRequest) model.AnalyzeResult {
-	return model.AnalyzeResult{Registry: req.Registry, AnalyzerRuns: []string{Name}}
+func resultFromRequest(req sdkplugin.AnalyzeRequest) sdkplugin.AnalyzeResult {
+	return sdkplugin.AnalyzeResult{Registry: req.Registry, AnalyzerRuns: []string{Name}}
 }
 
 // vulnerabilitiesForDependency returns the registry vulnerabilities for a
 // dependency node, or nil when the package is absent from the registry.
-func vulnerabilitiesForDependency(req model.AnalyzeRequest, dep *model.DependencyNode) []model.Vulnerability {
+func vulnerabilitiesForDependency(req sdkplugin.AnalyzeRequest, dep *sdkmodel.DependencyNode) []sdkmodel.Vulnerability {
 	if req.Registry == nil || dep == nil {
 		return nil
 	}
@@ -256,7 +258,7 @@ type applyOutcome struct {
 // in govulncheck's output are marked as either TierPackage Unreachable
 // (module not imported) or TierSymbol Unreachable (imported but no call
 // path).
-func applyRunnerResult(req model.AnalyzeRequest, attributor model.RootAttributor, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
+func applyRunnerResult(req sdkplugin.AnalyzeRequest, attributor sdkmodel.RootAttributor, moduleRoot string, runRes RunnerResult, runnerName string, now time.Time) applyOutcome {
 	var outcome applyOutcome
 	timestamp := now.UTC().Format(time.RFC3339)
 	for _, dep := range req.Graph.DependencyNodes() {
@@ -264,7 +266,7 @@ func applyRunnerResult(req model.AnalyzeRequest, attributor model.RootAttributor
 			continue
 		}
 		attributed := attributeGoPackage(attributor, dep, moduleRoot, runRes.BuildModules)
-		if attributed == model.AttributedElsewhere {
+		if attributed == sdkmodel.AttributedElsewhere {
 			continue
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
@@ -276,12 +278,12 @@ func applyRunnerResult(req model.AnalyzeRequest, attributor model.RootAttributor
 			// module root now contributes its own evidence and the
 			// annotation is the derived summary over all of them.
 			finding, hit := lookupFinding(runRes, vuln)
-			r := &model.ReachabilityEvidence{
+			r := &sdkmodel.ReachabilityEvidence{
 				ModuleRoot: moduleRoot,
 				Analyzer:   Name,
 				AnalyzedAt: timestamp,
 			}
-			if attributed == model.AttributedToSite {
+			if attributed == sdkmodel.AttributedToSite {
 				// Named only when this occurrence was established for this
 				// root -- by a site the producer attributed, or by the module
 				// version govulncheck selected for this build. Otherwise the
@@ -291,24 +293,24 @@ func applyRunnerResult(req model.AnalyzeRequest, attributor model.RootAttributor
 			}
 			switch {
 			case hit && finding.CalledBy:
-				r.Status = model.ReachabilityReachable
-				r.Tier = model.TierSymbol
-				r.Symbols = append([]model.AffectedSymbol(nil), finding.Symbols...)
-				r.CallPaths = append([]model.CallPath(nil), finding.CallPaths...)
+				r.Status = sdkmodel.ReachabilityReachable
+				r.Tier = sdkmodel.TierSymbol
+				r.Symbols = append([]sdkmodel.AffectedSymbol(nil), finding.Symbols...)
+				r.CallPaths = append([]sdkmodel.CallPath(nil), finding.CallPaths...)
 				outcome.reachable++
 			case hit && finding.ImportedBy:
-				r.Status = model.ReachabilityUnreachable
-				r.Tier = model.TierSymbol
+				r.Status = sdkmodel.ReachabilityUnreachable
+				r.Tier = sdkmodel.TierSymbol
 				r.Reason = "no-call-into-vulnerable-symbol"
 				outcome.unreachable++
 			case packageImportedByModule(dep, runRes.ImportedModules):
-				r.Status = model.ReachabilityUnreachable
-				r.Tier = model.TierSymbol
+				r.Status = sdkmodel.ReachabilityUnreachable
+				r.Tier = sdkmodel.TierSymbol
 				r.Reason = "no-call-into-vulnerable-symbol"
 				outcome.unreachable++
 			default:
-				r.Status = model.ReachabilityUnreachable
-				r.Tier = model.TierPackage
+				r.Status = sdkmodel.ReachabilityUnreachable
+				r.Tier = sdkmodel.TierPackage
 				r.Reason = "package-not-imported"
 				outcome.unreachable++
 			}
@@ -325,13 +327,13 @@ func applyRunnerResult(req model.AnalyzeRequest, attributor model.RootAttributor
 // The summary is derived, never accumulated by hand: reachable anywhere wins,
 // and unreachable requires every module root to say so. Writing that rule at
 // each call site is how the first-module-wins behaviour got there.
-func withEvidence(current *model.Reachability, evidence model.ReachabilityEvidence, timestamp string) *model.Reachability {
-	var all []model.ReachabilityEvidence
+func withEvidence(current *sdkmodel.Reachability, evidence sdkmodel.ReachabilityEvidence, timestamp string) *sdkmodel.Reachability {
+	var all []sdkmodel.ReachabilityEvidence
 	if current != nil && current.Analyzer == Name {
 		all = current.Evidence
 	}
 	all = append(all, evidence)
-	summary := model.DeriveReachability(all)
+	summary := sdkmodel.DeriveReachability(all)
 	summary.Analyzer = Name
 	summary.AnalyzedAt = timestamp
 	summary.Evidence = all
@@ -348,14 +350,14 @@ func withEvidence(current *model.Reachability, evidence model.ReachabilityEviden
 // at. DeriveReachability requires every root to say unreachable, so B's
 // unknown is exactly what keeps the aggregate honest -- but only if it is
 // recorded.
-func annotateModuleUnknown(req model.AnalyzeRequest, attributor model.RootAttributor, moduleRoot, reason string, now time.Time) int {
+func annotateModuleUnknown(req sdkplugin.AnalyzeRequest, attributor sdkmodel.RootAttributor, moduleRoot, reason string, now time.Time) int {
 	timestamp := now.UTC().Format(time.RFC3339)
 	count := 0
 	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
 			continue
 		}
-		if attributor.Attribute(dep, moduleRoot) == model.AttributedElsewhere {
+		if attributor.Attribute(dep, moduleRoot) == sdkmodel.AttributedElsewhere {
 			continue
 		}
 		vulns := vulnerabilitiesForDependency(req, dep)
@@ -364,11 +366,11 @@ func annotateModuleUnknown(req model.AnalyzeRequest, attributor model.RootAttrib
 			// module that could not be analyzed must not overwrite another
 			// module's finding, and it must stop an all-unreachable summary
 			// from reading as unreachable. DeriveReachability enforces both.
-			vulns[i].Reachability = withEvidence(vulns[i].Reachability, model.ReachabilityEvidence{
+			vulns[i].Reachability = withEvidence(vulns[i].Reachability, sdkmodel.ReachabilityEvidence{
 				ModuleRoot: moduleRoot,
 				Analyzer:   Name,
-				Status:     model.ReachabilityUnknown,
-				Tier:       model.TierNone,
+				Status:     sdkmodel.ReachabilityUnknown,
+				Tier:       sdkmodel.TierNone,
 				Reason:     reason,
 				AnalyzedAt: timestamp,
 			}, timestamp)
@@ -378,7 +380,7 @@ func annotateModuleUnknown(req model.AnalyzeRequest, attributor model.RootAttrib
 	return count
 }
 
-func annotateAllUnknown(req model.AnalyzeRequest, reason string, now time.Time) {
+func annotateAllUnknown(req sdkplugin.AnalyzeRequest, reason string, now time.Time) {
 	timestamp := now.UTC().Format(time.RFC3339)
 	for _, dep := range req.Graph.DependencyNodes() {
 		if dep == nil || !isGoPackage(dep) {
@@ -392,10 +394,10 @@ func annotateAllUnknown(req model.AnalyzeRequest, reason string, now time.Time) 
 			// cannot join to anything, and a reader cannot tell an empty
 			// evidence list meaning "nothing was recorded" from one meaning
 			// "no root was found".
-			vulns[i].Reachability = withEvidence(vulns[i].Reachability, model.ReachabilityEvidence{
+			vulns[i].Reachability = withEvidence(vulns[i].Reachability, sdkmodel.ReachabilityEvidence{
 				Analyzer:   Name,
-				Status:     model.ReachabilityUnknown,
-				Tier:       model.TierNone,
+				Status:     sdkmodel.ReachabilityUnknown,
+				Tier:       sdkmodel.TierNone,
 				Reason:     reason,
 				AnalyzedAt: timestamp,
 			}, timestamp)
@@ -407,7 +409,7 @@ func annotateAllUnknown(req model.AnalyzeRequest, reason string, now time.Time) 
 // findings via OSV id and aliases. Grype emits CVE-prefixed identifiers
 // while govulncheck emits GO/GHSA ids; this function bridges the two via
 // the alias arrays produced by the OSV envelopes.
-func lookupFinding(r RunnerResult, vuln *model.Vulnerability) (Finding, bool) {
+func lookupFinding(r RunnerResult, vuln *sdkmodel.Vulnerability) (Finding, bool) {
 	if vuln == nil {
 		return Finding{}, false
 	}
@@ -437,17 +439,17 @@ func lookupFinding(r RunnerResult, vuln *model.Vulnerability) (Finding, bool) {
 
 // isGoPackage reports whether pkg's ecosystem or build system identifies
 // it as a Go module dependency.
-func isGoPackage(pkg *model.DependencyNode) bool {
+func isGoPackage(pkg *sdkmodel.DependencyNode) bool {
 	if pkg == nil {
 		return false
 	}
-	if pkg.Ecosystem == model.EcosystemGo {
+	if pkg.Ecosystem == sdkmodel.EcosystemGo {
 		return true
 	}
-	if pkg.PackageManager == model.PackageManagerGoMod {
+	if pkg.PackageManager == sdkmodel.PackageManagerGoMod {
 		return true
 	}
-	if pkg.Language == model.LanguageGo {
+	if pkg.Language == sdkmodel.LanguageGo {
 		return true
 	}
 	return false
@@ -463,14 +465,14 @@ func isGoPackage(pkg *model.DependencyNode) bool {
 // path and version both match one was the copy analyzed here; a same-path node
 // at a different version belongs to another root's build and must not be
 // named as this finding's occurrence.
-func attributeGoPackage(attributor model.RootAttributor, pkg *model.DependencyNode, moduleRoot string, buildModules map[string]string) model.RootAttribution {
+func attributeGoPackage(attributor sdkmodel.RootAttributor, pkg *sdkmodel.DependencyNode, moduleRoot string, buildModules map[string]string) sdkmodel.RootAttribution {
 	attributed := attributor.Attribute(pkg, moduleRoot)
-	if attributed != model.AttributedToRootOnly {
+	if attributed != sdkmodel.AttributedToRootOnly {
 		return attributed
 	}
 	switch matchBuildModule(pkg, buildModules) {
 	case buildModuleSelected:
-		return model.AttributedToSite
+		return sdkmodel.AttributedToSite
 	case buildModuleOtherVersion:
 		// Positive evidence, not an absence. The trace names this module path
 		// and names a different version for it, so minimal version selection
@@ -478,7 +480,7 @@ func attributeGoPackage(attributor model.RootAttributor, pkg *model.DependencyNo
 		// through to root-only let that node inherit the finding anyway --
 		// lookupFinding keys on the advisory ID alone, so a v2 node picked up
 		// a reachable verdict produced by a build that selected v1.
-		return model.AttributedElsewhere
+		return sdkmodel.AttributedElsewhere
 	}
 	return attributed
 }
@@ -499,7 +501,7 @@ const (
 // matchBuildModule reports what the build-module trace says about pkg: that it
 // is the version minimal version selection chose, that the same module path
 // was selected at a different version, or that the path is absent entirely.
-func matchBuildModule(pkg *model.DependencyNode, buildModules map[string]string) buildModuleMatch {
+func matchBuildModule(pkg *sdkmodel.DependencyNode, buildModules map[string]string) buildModuleMatch {
 	if pkg == nil || len(buildModules) == 0 {
 		return buildModuleAbsent
 	}
@@ -527,7 +529,7 @@ func matchBuildModule(pkg *model.DependencyNode, buildModules map[string]string)
 	return buildModuleAbsent
 }
 
-func packageImportedByModule(pkg *model.DependencyNode, importedModules map[string]struct{}) bool {
+func packageImportedByModule(pkg *sdkmodel.DependencyNode, importedModules map[string]struct{}) bool {
 	if pkg == nil || len(importedModules) == 0 {
 		return false
 	}
@@ -621,7 +623,7 @@ func failureReason(err error) string {
 // cannot express is replacing a Reachability annotation already written by a
 // DIFFERENT analyzer; built-in analyzer dispatch is language-disjoint, so no
 // two built-ins annotate the same package.
-func finishResult(req model.AnalyzeRequest, out model.AnalyzeResult) model.AnalyzeResult {
+func finishResult(req sdkplugin.AnalyzeRequest, out sdkplugin.AnalyzeResult) sdkplugin.AnalyzeResult {
 	if !req.AcceptPackageUpdates || req.Registry == nil {
 		return out
 	}

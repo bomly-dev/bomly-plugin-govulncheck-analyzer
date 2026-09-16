@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"github.com/bomly-dev/bomly-sdk/testkit"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 // fakeRunner returns a canned RunnerResult or error for tests.
@@ -38,21 +40,21 @@ func newGoModuleDir(t *testing.T) string {
 
 // newGoGraph builds a single-Go-dependency graph plus a registry whose package
 // (keyed by the dependency's PURL) carries the supplied vulnerabilities.
-func newGoGraph(t testing.TB, moduleDir string, vulns ...model.Vulnerability) (*model.Graph, *model.PackageRegistry) {
+func newGoGraph(t testing.TB, moduleDir string, vulns ...sdkmodel.Vulnerability) (*sdkmodel.Graph, *sdkmodel.PackageRegistry) {
 	t.Helper()
-	g := model.New()
-	dep := testkit.MustDependencyCoords(t, model.Coordinates{
+	g := sdkmodel.New()
+	dep := testkit.MustDependencyCoords(t, sdkmodel.Coordinates{
 		Name:           "example.com/lib",
 		Version:        "v1.0.0",
 		Ecosystem:      "go",
 		PackageManager: "gomod",
 	})
-	dep.Locations = []model.PackageLocation{{RealPath: filepath.Join(moduleDir, "go.sum")}}
+	dep.Locations = []sdkmodel.PackageLocation{{RealPath: filepath.Join(moduleDir, "go.sum")}}
 	purl := dep.NodeID()
 	dep.PackageRef = purl
 	_ = g.AddNode(dep)
 
-	registry := model.NewPackageRegistry()
+	registry := sdkmodel.NewPackageRegistry()
 	pkg := registry.Ensure(purl)
 	pkg.Vulnerabilities = append(pkg.Vulnerabilities, vulns...)
 	return g, registry
@@ -60,7 +62,7 @@ func newGoGraph(t testing.TB, moduleDir string, vulns ...model.Vulnerability) (*
 
 // firstVulnReachability returns the reachability for the single registry
 // package's first vulnerability.
-func firstVulnReachability(t *testing.T, registry *model.PackageRegistry) *model.Reachability {
+func firstVulnReachability(t *testing.T, registry *sdkmodel.PackageRegistry) *sdkmodel.Reachability {
 	t.Helper()
 	pkgs := registry.All()
 	if len(pkgs) == 0 || len(pkgs[0].Vulnerabilities) == 0 {
@@ -71,7 +73,7 @@ func firstVulnReachability(t *testing.T, registry *model.PackageRegistry) *model
 
 func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
-	vuln := model.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
 	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{
@@ -81,10 +83,10 @@ func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 					OSV:        "GO-2024-1",
 					CalledBy:   true,
 					ImportedBy: true,
-					Symbols:    []model.AffectedSymbol{{Symbol: "Decode", Package: "example.com/lib"}},
-					CallPaths: []model.CallPath{
-						{Frames: []model.CallFrame{
-							{Function: "main", Package: "main", Position: model.SourcePosition{File: "main.go", Line: 10}},
+					Symbols:    []sdkmodel.AffectedSymbol{{Symbol: "Decode", Package: "example.com/lib"}},
+					CallPaths: []sdkmodel.CallPath{
+						{Frames: []sdkmodel.CallFrame{
+							{Function: "main", Package: "main", Position: sdkmodel.SourcePosition{File: "main.go", Line: 10}},
 						}},
 					},
 				},
@@ -92,7 +94,7 @@ func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 		},
 	}}
 
-	res, err := a.Analyze(context.Background(), model.AnalyzeRequest{
+	res, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{
 		Graph:       g,
 		Registry:    registry,
 		ProjectPath: moduleDir,
@@ -104,10 +106,10 @@ func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 	if r == nil {
 		t.Fatal("expected Reachability to be set")
 	}
-	if r.Status != model.ReachabilityReachable {
+	if r.Status != sdkmodel.ReachabilityReachable {
 		t.Errorf("status = %q, want reachable", r.Status)
 	}
-	if r.Tier != model.TierSymbol {
+	if r.Tier != sdkmodel.TierSymbol {
 		t.Errorf("tier = %q, want symbol", r.Tier)
 	}
 	if len(r.CallPaths) != 1 {
@@ -120,7 +122,7 @@ func TestAnalyzerMarksReachableFromGovulncheckHit(t *testing.T) {
 
 func TestAnalyzerMarksUnreachableWhenImportedButNotCalled(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
-	vuln := model.Vulnerability{ID: "GO-2024-2", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-2", Source: "osv", ParsedSeverity: "high"}
 	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{
@@ -130,45 +132,45 @@ func TestAnalyzerMarksUnreachableWhenImportedButNotCalled(t *testing.T) {
 			},
 		},
 	}}
-	_, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
+	_, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := firstVulnReachability(t, registry)
-	if r.Status != model.ReachabilityUnreachable || r.Tier != model.TierSymbol || r.Reason != "no-call-into-vulnerable-symbol" {
+	if r.Status != sdkmodel.ReachabilityUnreachable || r.Tier != sdkmodel.TierSymbol || r.Reason != "no-call-into-vulnerable-symbol" {
 		t.Errorf("unexpected reachability: %+v", r)
 	}
 }
 
 func TestAnalyzerMarksUnreachableTierPackageWhenModuleNotImported(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
-	vuln := model.Vulnerability{ID: "GO-2024-3", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-3", Source: "osv", ParsedSeverity: "high"}
 	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	// Runner returns nothing — no findings, no imported modules.
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{result: RunnerResult{}}}
-	_, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
+	_, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := firstVulnReachability(t, registry)
-	if r.Status != model.ReachabilityUnreachable || r.Tier != model.TierPackage || r.Reason != "package-not-imported" {
+	if r.Status != sdkmodel.ReachabilityUnreachable || r.Tier != sdkmodel.TierPackage || r.Reason != "package-not-imported" {
 		t.Errorf("unexpected reachability: %+v", r)
 	}
 }
 
 func TestAnalyzerDegradesToUnknownOnRunnerError(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
-	vuln := model.Vulnerability{ID: "GO-2024-4", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-4", Source: "osv", ParsedSeverity: "high"}
 	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	a := Analyzer{DisableCache: true, Runner: &fakeRunner{err: errors.New("govulncheck binary not found")}}
-	_, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
+	_, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
 	if err != nil {
 		t.Fatalf("Analyze should not error on runner failure: %v", err)
 	}
 	r := firstVulnReachability(t, registry)
-	if r.Status != model.ReachabilityUnknown {
+	if r.Status != sdkmodel.ReachabilityUnknown {
 		t.Errorf("status = %q, want unknown", r.Status)
 	}
 	if r.Reason != "missing-toolchain" {
@@ -179,7 +181,7 @@ func TestAnalyzerDegradesToUnknownOnRunnerError(t *testing.T) {
 func TestAnalyzerBridgesCVEToGOIDViaAliases(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
 	// Grype-style vuln carries a CVE id with an alias to the GO id.
-	vuln := model.Vulnerability{
+	vuln := sdkmodel.Vulnerability{
 		ID:             "CVE-2024-39999",
 		Source:         "grype",
 		ParsedSeverity: "high",
@@ -194,19 +196,19 @@ func TestAnalyzerBridgesCVEToGOIDViaAliases(t *testing.T) {
 					OSV:        "GO-2024-5",
 					CalledBy:   true,
 					ImportedBy: true,
-					Symbols:    []model.AffectedSymbol{{Symbol: "X"}},
-					CallPaths:  []model.CallPath{{Frames: []model.CallFrame{{Function: "main"}}}},
+					Symbols:    []sdkmodel.AffectedSymbol{{Symbol: "X"}},
+					CallPaths:  []sdkmodel.CallPath{{Frames: []sdkmodel.CallFrame{{Function: "main"}}}},
 					Aliases:    []string{"CVE-2024-39999"},
 				},
 			},
 		},
 	}}
-	_, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
+	_, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := firstVulnReachability(t, registry)
-	if r == nil || r.Status != model.ReachabilityReachable {
+	if r == nil || r.Status != sdkmodel.ReachabilityReachable {
 		t.Errorf("alias-bridged vuln not marked reachable: %+v", r)
 	}
 }
@@ -215,29 +217,29 @@ func TestAnalyzerApplicableRequiresGoVulns(t *testing.T) {
 	a := Analyzer{}
 
 	// build a graph+registry where dep's package carries the given vulns.
-	build := func(name, ecosystem string, vulns ...model.Vulnerability) (*model.Graph, *model.PackageRegistry) {
-		g := model.New()
-		dep := testkit.MustDependencyCoords(t, model.Coordinates{Name: name, Ecosystem: model.Ecosystem(ecosystem)})
+	build := func(name, ecosystem string, vulns ...sdkmodel.Vulnerability) (*sdkmodel.Graph, *sdkmodel.PackageRegistry) {
+		g := sdkmodel.New()
+		dep := testkit.MustDependencyCoords(t, sdkmodel.Coordinates{Name: name, Ecosystem: sdkmodel.Ecosystem(ecosystem)})
 		purl := dep.NodeID()
 		dep.PackageRef = purl
 		_ = g.AddNode(dep)
-		registry := model.NewPackageRegistry()
-		registry.Ensure(purl).Vulnerabilities = append([]model.Vulnerability(nil), vulns...)
+		registry := sdkmodel.NewPackageRegistry()
+		registry.Ensure(purl).Vulnerabilities = append([]sdkmodel.Vulnerability(nil), vulns...)
 		return g, registry
 	}
 
-	g, registry := build("left-pad", "npm", model.Vulnerability{ID: "x"})
-	if ok, err := a.Applicable(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || ok {
+	g, registry := build("left-pad", "npm", sdkmodel.Vulnerability{ID: "x"})
+	if ok, err := a.Applicable(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || ok {
 		t.Errorf("Applicable on npm-only graph = (%v, %v); want (false, nil)", ok, err)
 	}
 
-	g, registry = build("example.com/lib", "go", model.Vulnerability{ID: "x"})
-	if ok, err := a.Applicable(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || !ok {
+	g, registry = build("example.com/lib", "go", sdkmodel.Vulnerability{ID: "x"})
+	if ok, err := a.Applicable(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || !ok {
 		t.Errorf("Applicable on go-with-vulns graph = (%v, %v); want (true, nil)", ok, err)
 	}
 
 	g, registry = build("example.com/lib", "go")
-	if ok, err := a.Applicable(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || ok {
+	if ok, err := a.Applicable(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry}); err != nil || ok {
 		t.Errorf("Applicable on go-without-vulns graph = (%v, %v); want (false, nil)", ok, err)
 	}
 }

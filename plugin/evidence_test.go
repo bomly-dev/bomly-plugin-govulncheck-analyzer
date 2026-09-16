@@ -3,7 +3,7 @@ package plugin
 import (
 	"testing"
 
-	model "github.com/bomly-dev/bomly-sdk"
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
 )
 
 // TestEvidenceFromASecondModuleIsNotDiscarded pins the loss phase 2.8 removes.
@@ -17,26 +17,26 @@ import (
 func TestEvidenceFromASecondModuleIsNotDiscarded(t *testing.T) {
 	const stamp = "2026-08-31T00:00:00Z"
 
-	first := withEvidence(nil, model.ReachabilityEvidence{
+	first := withEvidence(nil, sdkmodel.ReachabilityEvidence{
 		ModuleRoot: "apps/api",
 		Analyzer:   Name,
-		Status:     model.ReachabilityUnreachable,
-		Tier:       model.TierSymbol,
+		Status:     sdkmodel.ReachabilityUnreachable,
+		Tier:       sdkmodel.TierSymbol,
 		Reason:     "no-call-into-vulnerable-symbol",
 	}, stamp)
-	if first.Status != model.ReachabilityUnreachable {
+	if first.Status != sdkmodel.ReachabilityUnreachable {
 		t.Fatalf("first pass = %q, want unreachable", first.Status)
 	}
 
-	second := withEvidence(first, model.ReachabilityEvidence{
+	second := withEvidence(first, sdkmodel.ReachabilityEvidence{
 		ModuleRoot:     "apps/web",
 		Analyzer:       Name,
-		Status:         model.ReachabilityReachable,
-		Tier:           model.TierSymbol,
+		Status:         sdkmodel.ReachabilityReachable,
+		Tier:           sdkmodel.TierSymbol,
 		DependencyRefs: []string{"pkg:golang/example.com/lib@v1.0.0"},
 	}, stamp)
 
-	if second.Status != model.ReachabilityReachable {
+	if second.Status != sdkmodel.ReachabilityReachable {
 		t.Errorf("summary = %q, want a reachable second module to win", second.Status)
 	}
 	if len(second.Evidence) != 2 {
@@ -58,16 +58,16 @@ func TestEvidenceFromASecondModuleIsNotDiscarded(t *testing.T) {
 func TestUnanalyzedModuleDoesNotReadAsUnreachable(t *testing.T) {
 	const stamp = "2026-08-31T00:00:00Z"
 
-	r := withEvidence(nil, model.ReachabilityEvidence{
+	r := withEvidence(nil, sdkmodel.ReachabilityEvidence{
 		ModuleRoot: "apps/api", Analyzer: Name,
-		Status: model.ReachabilityUnreachable, Tier: model.TierPackage, Reason: "package-not-imported",
+		Status: sdkmodel.ReachabilityUnreachable, Tier: sdkmodel.TierPackage, Reason: "package-not-imported",
 	}, stamp)
-	r = withEvidence(r, model.ReachabilityEvidence{
+	r = withEvidence(r, sdkmodel.ReachabilityEvidence{
 		ModuleRoot: "apps/web", Analyzer: Name,
-		Status: model.ReachabilityUnknown, Tier: model.TierNone, Reason: "missing-toolchain",
+		Status: sdkmodel.ReachabilityUnknown, Tier: sdkmodel.TierNone, Reason: "missing-toolchain",
 	}, stamp)
 
-	if r.Status != model.ReachabilityUnknown {
+	if r.Status != sdkmodel.ReachabilityUnknown {
 		t.Errorf("summary = %q, want unknown when a module could not be analyzed", r.Status)
 	}
 	if r.Reason == "" {
