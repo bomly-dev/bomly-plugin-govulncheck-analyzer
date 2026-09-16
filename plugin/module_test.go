@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"testing"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"github.com/bomly-dev/bomly-sdk/conformance"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 // TestConformance runs the SDK conformance suite against the module,
@@ -29,7 +31,7 @@ func TestModuleDescriptorMatchesAnalyzer(t *testing.T) {
 
 // clearAnalyzedAt blanks the wall-clock annotation timestamps so two runs of
 // the same analysis compare equal.
-func clearAnalyzedAt(reg *model.PackageRegistry) {
+func clearAnalyzedAt(reg *sdkmodel.PackageRegistry) {
 	for _, pkg := range reg.All() {
 		for i := range pkg.Vulnerabilities {
 			if r := pkg.Vulnerabilities[i].Reachability; r != nil {
@@ -44,21 +46,21 @@ func clearAnalyzedAt(reg *model.PackageRegistry) {
 // registry yields exactly the registry the legacy in-place path produces.
 func TestPackageUpdatesEquivalence(t *testing.T) {
 	moduleDir := newGoModuleDir(t)
-	vuln := model.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
 	runnerResult := RunnerResult{
 		Findings: map[string]Finding{
 			"GO-2024-1": {
 				OSV:        "GO-2024-1",
 				CalledBy:   true,
 				ImportedBy: true,
-				Symbols:    []model.AffectedSymbol{{Symbol: "Decode", Package: "example.com/lib"}},
+				Symbols:    []sdkmodel.AffectedSymbol{{Symbol: "Decode", Package: "example.com/lib"}},
 			},
 		},
 	}
 
 	legacyGraph, legacyReg := newGoGraph(t, moduleDir, vuln)
 	legacy := Analyzer{DisableCache: true, Runner: &fakeRunner{result: runnerResult}}
-	legacyRes, err := legacy.Analyze(context.Background(), model.AnalyzeRequest{
+	legacyRes, err := legacy.Analyze(context.Background(), sdkplugin.AnalyzeRequest{
 		Graph: legacyGraph, Registry: legacyReg, ProjectPath: moduleDir,
 	})
 	if err != nil {
@@ -73,7 +75,7 @@ func TestPackageUpdatesEquivalence(t *testing.T) {
 
 	deltaGraph, deltaReg := newGoGraph(t, moduleDir, vuln)
 	delta := Analyzer{DisableCache: true, Runner: &fakeRunner{result: runnerResult}}
-	deltaRes, err := delta.Analyze(context.Background(), model.AnalyzeRequest{
+	deltaRes, err := delta.Analyze(context.Background(), sdkplugin.AnalyzeRequest{
 		Graph: deltaGraph, Registry: deltaReg, ProjectPath: moduleDir,
 		AcceptPackageUpdates: true,
 	})
@@ -88,7 +90,7 @@ func TestPackageUpdatesEquivalence(t *testing.T) {
 	}
 
 	_, pristineReg := newGoGraph(t, moduleDir, vuln)
-	merged := model.ApplyPackageUpdates(pristineReg, deltaRes.PackageUpdates)
+	merged := sdkmodel.ApplyPackageUpdates(pristineReg, deltaRes.PackageUpdates)
 
 	clearAnalyzedAt(legacyReg)
 	clearAnalyzedAt(merged)

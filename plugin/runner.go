@@ -11,7 +11,7 @@ package plugin
 import (
 	"context"
 
-	model "github.com/bomly-dev/bomly-sdk"
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
 )
 
 // Runner executes govulncheck against one Go module root and returns the
@@ -61,8 +61,8 @@ type Finding struct {
 	Aliases    []string
 	FixedIn    string
 	Modules    []string
-	Symbols    []model.AffectedSymbol
-	CallPaths  []model.CallPath
+	Symbols    []sdkmodel.AffectedSymbol
+	CallPaths  []sdkmodel.CallPath
 	ImportedBy bool // app source imports the affected module/package
 	CalledBy   bool // app source calls into an affected symbol
 }

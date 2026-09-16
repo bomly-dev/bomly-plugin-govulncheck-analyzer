@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"github.com/bomly-dev/bomly-sdk/testkit"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 // mapRunner answers per module directory, so a test can make one root succeed
@@ -43,40 +45,40 @@ func goModuleDirNamed(t *testing.T, parent, name string) string {
 }
 
 // goNodeIn builds one Go dependency node sited in moduleRoot.
-func goNodeIn(t *testing.T, name, version, moduleRoot string, declareRoot bool) *model.DependencyNode {
+func goNodeIn(t *testing.T, name, version, moduleRoot string, declareRoot bool) *sdkmodel.DependencyNode {
 	t.Helper()
-	dep := testkit.MustDependencyCoords(t, model.Coordinates{
+	dep := testkit.MustDependencyCoords(t, sdkmodel.Coordinates{
 		Name:           name,
 		Version:        version,
 		Ecosystem:      "go",
 		PackageManager: "gomod",
 	})
-	location := model.PackageLocation{RealPath: filepath.Join(moduleRoot, "go.sum")}
+	location := sdkmodel.PackageLocation{RealPath: filepath.Join(moduleRoot, "go.sum")}
 	if declareRoot {
 		location.ModuleRoot = moduleRoot
 	}
-	dep.Locations = []model.PackageLocation{location}
+	dep.Locations = []sdkmodel.PackageLocation{location}
 	dep.PackageRef = dep.NodeID()
 	return dep
 }
 
 // graphWithVulns wires nodes into a graph and gives each node's package one
 // vulnerability in the registry.
-func graphWithVulns(t *testing.T, nodes []*model.DependencyNode, ids []string) (*model.Graph, *model.PackageRegistry) {
+func graphWithVulns(t *testing.T, nodes []*sdkmodel.DependencyNode, ids []string) (*sdkmodel.Graph, *sdkmodel.PackageRegistry) {
 	t.Helper()
-	g := model.New()
-	registry := model.NewPackageRegistry()
+	g := sdkmodel.New()
+	registry := sdkmodel.NewPackageRegistry()
 	for i, node := range nodes {
 		if err := g.AddNode(node); err != nil {
 			t.Fatalf("AddNode(%s): %v", node.NodeID(), err)
 		}
 		pkg := registry.Ensure(node.PackageRef)
-		pkg.Vulnerabilities = append(pkg.Vulnerabilities, model.Vulnerability{ID: ids[i], Source: "osv"})
+		pkg.Vulnerabilities = append(pkg.Vulnerabilities, sdkmodel.Vulnerability{ID: ids[i], Source: "osv"})
 	}
 	return g, registry
 }
 
-func reachabilityFor(t *testing.T, registry *model.PackageRegistry, purl string) *model.Reachability {
+func reachabilityFor(t *testing.T, registry *sdkmodel.PackageRegistry, purl string) *sdkmodel.Reachability {
 	t.Helper()
 	pkg, ok := registry.Get(purl)
 	if !ok || pkg == nil || len(pkg.Vulnerabilities) == 0 {
@@ -85,7 +87,7 @@ func reachabilityFor(t *testing.T, registry *model.PackageRegistry, purl string)
 	return pkg.Vulnerabilities[0].Reachability
 }
 
-func evidenceRoots(r *model.Reachability) []string {
+func evidenceRoots(r *sdkmodel.Reachability) []string {
 	if r == nil {
 		return nil
 	}
@@ -110,18 +112,18 @@ func TestEvidenceIsKeyedByTheModuleRootThatEstablishedIt(t *testing.T) {
 
 	apiDep := goNodeIn(t, "example.com/apilib", "v1.0.0", apiRoot, true)
 	webDep := goNodeIn(t, "example.com/weblib", "v2.0.0", webRoot, true)
-	g, registry := graphWithVulns(t, []*model.DependencyNode{apiDep, webDep}, []string{"GO-2024-1", "GO-2024-2"})
+	g, registry := graphWithVulns(t, []*sdkmodel.DependencyNode{apiDep, webDep}, []string{"GO-2024-1", "GO-2024-2"})
 
 	a := Analyzer{DisableCache: true, Runner: &mapRunner{results: map[string]RunnerResult{
 		apiRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
 		webRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
 	}}}
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
 
 	for _, tc := range []struct {
-		dep  *model.DependencyNode
+		dep  *sdkmodel.DependencyNode
 		want string
 	}{{apiDep, apiRoot}, {webDep, webRoot}} {
 		roots := evidenceRoots(reachabilityFor(t, registry, tc.dep.PackageRef))
@@ -145,25 +147,25 @@ func TestVendoredSiteUnderAnotherRootIsNotOurs(t *testing.T) {
 	// which module it belongs to. Both roots are vendored into, so both are
 	// discovered and both passes run.
 	apiDep := goNodeIn(t, "example.com/apilib", "v1.0.0", apiRoot, false)
-	apiDep.Locations = []model.PackageLocation{{
+	apiDep.Locations = []sdkmodel.PackageLocation{{
 		RealPath: filepath.Join(apiRoot, "vendor", "example.com", "apilib", "lib.go"),
 	}}
 	webDep := goNodeIn(t, "example.com/weblib", "v2.0.0", webRoot, false)
-	webDep.Locations = []model.PackageLocation{{
+	webDep.Locations = []sdkmodel.PackageLocation{{
 		RealPath: filepath.Join(webRoot, "vendor", "example.com", "weblib", "lib.go"),
 	}}
-	g, registry := graphWithVulns(t, []*model.DependencyNode{apiDep, webDep}, []string{"GO-2024-1", "GO-2024-2"})
+	g, registry := graphWithVulns(t, []*sdkmodel.DependencyNode{apiDep, webDep}, []string{"GO-2024-1", "GO-2024-2"})
 
 	a := Analyzer{DisableCache: true, Runner: &mapRunner{results: map[string]RunnerResult{
 		apiRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
 		webRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
 	}}}
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
 
 	for _, tc := range []struct {
-		dep  *model.DependencyNode
+		dep  *sdkmodel.DependencyNode
 		want string
 	}{{apiDep, apiRoot}, {webDep, webRoot}} {
 		roots := evidenceRoots(reachabilityFor(t, registry, tc.dep.PackageRef))
@@ -186,7 +188,7 @@ func TestBuildModuleVersionNamesTheExactOccurrence(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "modcache")
 	built := goNodeIn(t, "example.com/lib", "v1.0.0", cache, false)
 	other := goNodeIn(t, "example.com/lib", "v2.0.0", cache, false)
-	g, registry := graphWithVulns(t, []*model.DependencyNode{built, other}, []string{"GO-2024-1", "GO-2024-1"})
+	g, registry := graphWithVulns(t, []*sdkmodel.DependencyNode{built, other}, []string{"GO-2024-1", "GO-2024-1"})
 
 	a := Analyzer{DisableCache: true, Runner: &mapRunner{results: map[string]RunnerResult{
 		root: {
@@ -197,7 +199,7 @@ func TestBuildModuleVersionNamesTheExactOccurrence(t *testing.T) {
 			BuildModules: map[string]string{"example.com/lib": canonicalModuleVersion("v1.0")},
 		},
 	}}}
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: root}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: root}); err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
 
@@ -236,17 +238,17 @@ func TestFailedModuleRootStillContributesUnknownEvidence(t *testing.T) {
 	// package: exactly the workspace case where one root's answer must not
 	// stand for the other's silence.
 	dep := goNodeIn(t, "example.com/lib", "v1.0.0", apiRoot, true)
-	dep.Locations = append(dep.Locations, model.PackageLocation{
+	dep.Locations = append(dep.Locations, sdkmodel.PackageLocation{
 		RealPath:   filepath.Join(webRoot, "go.sum"),
 		ModuleRoot: webRoot,
 	})
-	g, registry := graphWithVulns(t, []*model.DependencyNode{dep}, []string{"GO-2024-1"})
+	g, registry := graphWithVulns(t, []*sdkmodel.DependencyNode{dep}, []string{"GO-2024-1"})
 
 	a := Analyzer{DisableCache: true, Runner: &mapRunner{
 		results: map[string]RunnerResult{apiRoot: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}}},
 		errs:    map[string]error{webRoot: errors.New("go: build failed")},
 	}}
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: workspace}); err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
 
@@ -257,12 +259,12 @@ func TestFailedModuleRootStillContributesUnknownEvidence(t *testing.T) {
 	if len(r.Evidence) != 2 {
 		t.Fatalf("evidence = %d entries (%v), want one per module root", len(r.Evidence), evidenceRoots(r))
 	}
-	if r.Status != model.ReachabilityUnknown {
+	if r.Status != sdkmodel.ReachabilityUnknown {
 		t.Errorf("summary = %q, want unknown: one root was never analyzed", r.Status)
 	}
 	var sawUnknownForWeb bool
 	for _, e := range r.Evidence {
-		if e.ModuleRoot == webRoot && e.Status == model.ReachabilityUnknown {
+		if e.ModuleRoot == webRoot && e.Status == sdkmodel.ReachabilityUnknown {
 			sawUnknownForWeb = true
 		}
 	}
@@ -283,13 +285,13 @@ func TestDeclaredRootsAreOnlyTrustedWhenTheyShareOurVocabulary(t *testing.T) {
 	dep := goNodeIn(t, "example.com/lib", "v1.0.0", root, false)
 	// A root spelled the way a detector might record it, which this run never
 	// analyzes.
-	dep.Locations = []model.PackageLocation{{RealPath: "vendor/modules.txt", ModuleRoot: "apps/api"}}
-	g, registry := graphWithVulns(t, []*model.DependencyNode{dep}, []string{"GO-2024-1"})
+	dep.Locations = []sdkmodel.PackageLocation{{RealPath: "vendor/modules.txt", ModuleRoot: "apps/api"}}
+	g, registry := graphWithVulns(t, []*sdkmodel.DependencyNode{dep}, []string{"GO-2024-1"})
 
 	a := Analyzer{DisableCache: true, Runner: &mapRunner{results: map[string]RunnerResult{
 		root: {Findings: map[string]Finding{}, ImportedModules: map[string]struct{}{}},
 	}}}
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: root}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: root}); err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
 
@@ -305,28 +307,28 @@ func TestDeclaredRootsAreOnlyTrustedWhenTheyShareOurVocabulary(t *testing.T) {
 // TestAttributorCalibratesOnOverlap covers the calibration directly, so the
 // two halves of the rule are pinned independently of a full Analyze run.
 func TestAttributorCalibratesOnOverlap(t *testing.T) {
-	node := testkit.MustDependencyCoords(t, model.Coordinates{
+	node := testkit.MustDependencyCoords(t, sdkmodel.Coordinates{
 		Name:           "example.com/lib",
 		Version:        "v1.0.0",
 		Ecosystem:      "go",
 		PackageManager: "gomod",
 	})
-	node.Locations = []model.PackageLocation{{ModuleRoot: "/ws/api"}}
-	g := model.New()
+	node.Locations = []sdkmodel.PackageLocation{{ModuleRoot: "/ws/api"}}
+	g := sdkmodel.New()
 	if err := g.AddNode(node); err != nil {
 		t.Fatal(err)
 	}
 
-	shared := model.NewRootAttributor([]string{"/ws/api", "/ws/web"}, g)
-	if got := shared.Attribute(node, "/ws/api"); got != model.AttributedToSite {
+	shared := sdkmodel.NewRootAttributor([]string{"/ws/api", "/ws/web"}, g)
+	if got := shared.Attribute(node, "/ws/api"); got != sdkmodel.AttributedToSite {
 		t.Errorf("attribute(own root) = %v, want attributed-to-site", got)
 	}
-	if got := shared.Attribute(node, "/ws/web"); got != model.AttributedElsewhere {
+	if got := shared.Attribute(node, "/ws/web"); got != sdkmodel.AttributedElsewhere {
 		t.Errorf("attribute(other root) = %v, want attributed-elsewhere", got)
 	}
 
-	foreign := model.NewRootAttributor([]string{"/other/one", "/other/two"}, g)
-	if got := foreign.Attribute(node, "/other/one"); got != model.AttributedToRootOnly {
+	foreign := sdkmodel.NewRootAttributor([]string{"/other/one", "/other/two"}, g)
+	if got := foreign.Attribute(node, "/other/one"); got != sdkmodel.AttributedToRootOnly {
 		t.Errorf("attribute under a foreign vocabulary = %v, want attributed-to-root-only", got)
 	}
 }

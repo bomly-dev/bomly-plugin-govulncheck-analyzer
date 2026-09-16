@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	model "github.com/bomly-dev/bomly-sdk"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 // discoverModuleRoots returns the set of Go module roots derivable from
@@ -22,7 +22,7 @@ import (
 //
 // Paths are normalized with filepath.Clean. Duplicates are removed and
 // results are sorted for deterministic ordering.
-func discoverModuleRoots(req model.AnalyzeRequest) []string {
+func discoverModuleRoots(req sdkplugin.AnalyzeRequest) []string {
 	seen := make(map[string]struct{})
 	roots := make([]string, 0)
 

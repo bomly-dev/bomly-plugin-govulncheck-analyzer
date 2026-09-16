@@ -8,8 +8,10 @@ import (
 	"reflect"
 	"testing"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"github.com/bomly-dev/bomly-sdk/testkit"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 func goFixture(parts ...string) string {
@@ -23,16 +25,16 @@ func goFixture(parts ...string) string {
 
 func TestDiscoverModuleRootsFromTestdata(t *testing.T) {
 	root := goFixture("module")
-	g := model.New()
-	pkg := testkit.MustDependencyCoords(t, model.Coordinates{Name: "example.com/lib", Ecosystem: model.EcosystemGo})
-	pkg.Locations = []model.PackageLocation{{RealPath: filepath.Join(root, "nested", "file.go")}}
+	g := sdkmodel.New()
+	pkg := testkit.MustDependencyCoords(t, sdkmodel.Coordinates{Name: "example.com/lib", Ecosystem: sdkmodel.EcosystemGo})
+	pkg.Locations = []sdkmodel.PackageLocation{{RealPath: filepath.Join(root, "nested", "file.go")}}
 	if err := g.AddNode(pkg); err != nil {
 		t.Fatal(err)
 	}
-	got := discoverModuleRoots(model.AnalyzeRequest{
+	got := discoverModuleRoots(sdkplugin.AnalyzeRequest{
 		Graph:       g,
 		ProjectPath: filepath.Join(root, "main.go"),
-		ExecutionTarget: model.ExecutionTarget{
+		ExecutionTarget: sdkplugin.ExecutionTarget{
 			Location: filepath.Join(root, "nested"),
 		},
 	})
@@ -70,8 +72,8 @@ func TestParseGovulncheckJSONFromTestdataRecoversAfterMalformedRecord(t *testing
 
 func TestGovulncheckDescriptorAndRunnerHelpers(t *testing.T) {
 	a := Analyzer{}
-	if err := a.Ready(context.Background(), model.AnalyzeRequest{}); err != nil || a.Descriptor().Name != Name {
-		t.Fatalf("descriptor = %+v ready_err=%v", a.Descriptor(), a.Ready(context.Background(), model.AnalyzeRequest{}))
+	if err := a.Ready(context.Background(), sdkplugin.AnalyzeRequest{}); err != nil || a.Descriptor().Name != Name {
+		t.Fatalf("descriptor = %+v ready_err=%v", a.Descriptor(), a.Ready(context.Background(), sdkplugin.AnalyzeRequest{}))
 	}
 	if !(Finding{OSV: "GO-1", ImportedBy: true}).hasResult() {
 		t.Fatal("imported finding should be actionable")
@@ -114,18 +116,18 @@ func TestGovulncheckFailureReasons(t *testing.T) {
 
 func TestGovulncheckAnalyzerMarksUnknownWithoutModuleRoot(t *testing.T) {
 	const purl = "pkg:golang/example.com/lib"
-	g := model.New()
+	g := sdkmodel.New()
 	pkg := testkit.MustDependencyNode(t, purl)
 	if err := g.AddNode(pkg); err != nil {
 		t.Fatal(err)
 	}
-	reg := model.NewPackageRegistry()
-	reg.Ensure(purl).Vulnerabilities = []model.Vulnerability{{ID: "GO-1"}}
-	if _, err := (Analyzer{DisableCache: true}).Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: reg}); err != nil {
+	reg := sdkmodel.NewPackageRegistry()
+	reg.Ensure(purl).Vulnerabilities = []sdkmodel.Vulnerability{{ID: "GO-1"}}
+	if _, err := (Analyzer{DisableCache: true}).Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: reg}); err != nil {
 		t.Fatal(err)
 	}
 	got := reg.Ensure(purl).Vulnerabilities[0].Reachability
-	if got == nil || got.Status != model.ReachabilityUnknown || got.Reason != "no-module-root-discovered" {
+	if got == nil || got.Status != sdkmodel.ReachabilityUnknown || got.Reason != "no-module-root-discovered" {
 		t.Fatalf("reachability = %+v", got)
 	}
 }
@@ -134,7 +136,7 @@ func TestGovulncheckLookupFindingAndImportedModuleAliases(t *testing.T) {
 	runResult := RunnerResult{Findings: map[string]Finding{
 		"GO-1": {OSV: "GO-1", Aliases: []string{"CVE-1"}},
 	}}
-	tests := []model.Vulnerability{
+	tests := []sdkmodel.Vulnerability{
 		{ID: "GO-1"},
 		{ID: "CVE-1"},
 		{ID: "GHSA-1", Aliases: []string{"GO-1"}},
@@ -145,7 +147,7 @@ func TestGovulncheckLookupFindingAndImportedModuleAliases(t *testing.T) {
 			t.Fatalf("lookupFinding(%+v) missed", vuln)
 		}
 	}
-	pkg := testkit.MustDependencyCoords(t, model.Coordinates{Name: "example.com/lib", Ecosystem: model.EcosystemGo})
+	pkg := testkit.MustDependencyCoords(t, sdkmodel.Coordinates{Name: "example.com/lib", Ecosystem: sdkmodel.EcosystemGo})
 	if !packageImportedByModule(pkg, map[string]struct{}{"example.com/lib": {}}) {
 		t.Fatal("package name was not matched against imported module set")
 	}

@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
+	sdkplugin "github.com/bomly-dev/bomly-sdk/plugin"
 )
 
 func TestResultCacheRoundTrip(t *testing.T) {
@@ -86,7 +88,7 @@ func TestAnalyzerWithCacheServesSecondCallFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "go.sum"), []byte("fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	vuln := model.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
 	g, registry := newGoGraph(t, moduleDir, vuln)
 
 	runner := &fakeRunner{
@@ -98,7 +100,7 @@ func TestAnalyzerWithCacheServesSecondCallFromCache(t *testing.T) {
 	}
 	a := Analyzer{Runner: runner, CacheDir: t.TempDir()}
 
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g, Registry: registry, ProjectPath: moduleDir}); err != nil {
 		t.Fatal(err)
 	}
 	if runner.called != 1 {
@@ -107,14 +109,14 @@ func TestAnalyzerWithCacheServesSecondCallFromCache(t *testing.T) {
 
 	// Re-run with a fresh graph — runner should not be invoked thanks to cache.
 	g2, registry2 := newGoGraph(t, moduleDir, vuln)
-	if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: g2, Registry: registry2, ProjectPath: moduleDir}); err != nil {
+	if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: g2, Registry: registry2, ProjectPath: moduleDir}); err != nil {
 		t.Fatal(err)
 	}
 	if runner.called != 1 {
 		t.Errorf("second Analyze should hit cache; runner.called = %d, want 1", runner.called)
 	}
 	r := firstVulnReachability(t, registry2)
-	if r == nil || r.Status != model.ReachabilityReachable {
+	if r == nil || r.Status != sdkmodel.ReachabilityReachable {
 		t.Errorf("cached path did not produce a reachable annotation: %+v", r)
 	}
 }
@@ -124,7 +126,7 @@ func TestAnalyzerDisableCacheAlwaysRunsRunner(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "go.sum"), []byte("fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	vuln := model.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
+	vuln := sdkmodel.Vulnerability{ID: "GO-2024-1", Source: "osv", ParsedSeverity: "high"}
 
 	runner := &fakeRunner{
 		result: RunnerResult{
@@ -136,11 +138,11 @@ func TestAnalyzerDisableCacheAlwaysRunsRunner(t *testing.T) {
 	g1, registry1 := newGoGraph(t, moduleDir, vuln)
 	g2, registry2 := newGoGraph(t, moduleDir, vuln)
 	cases := []struct {
-		g        *model.Graph
-		registry *model.PackageRegistry
+		g        *sdkmodel.Graph
+		registry *sdkmodel.PackageRegistry
 	}{{g1, registry1}, {g2, registry2}}
 	for _, tc := range cases {
-		if _, err := a.Analyze(context.Background(), model.AnalyzeRequest{Graph: tc.g, Registry: tc.registry, ProjectPath: moduleDir}); err != nil {
+		if _, err := a.Analyze(context.Background(), sdkplugin.AnalyzeRequest{Graph: tc.g, Registry: tc.registry, ProjectPath: moduleDir}); err != nil {
 			t.Fatal(err)
 		}
 	}

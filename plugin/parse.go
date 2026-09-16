@@ -7,9 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	model "github.com/bomly-dev/bomly-sdk"
 	"go.uber.org/zap"
 	"golang.org/x/mod/semver"
+
+	sdkmodel "github.com/bomly-dev/bomly-sdk/model"
 )
 
 // govulncheck -json emits a stream of single-key envelopes. Each line is
@@ -136,12 +137,12 @@ func mergeFinding(into map[string]Finding, modules map[string]struct{}, buildMod
 	// its packages is imported.
 	// The SDK's CallPath contract is entry point → sink (Frames[0] is the
 	// entry point), the reverse of govulncheck's trace order.
-	frames := make([]model.CallFrame, 0, len(src.Trace))
+	frames := make([]sdkmodel.CallFrame, 0, len(src.Trace))
 	for _, t := range slices.Backward(src.Trace) {
 		if t.Module != "" && t.Package != "" {
 			modules[t.Module] = struct{}{}
 		}
-		frames = append(frames, model.CallFrame{
+		frames = append(frames, sdkmodel.CallFrame{
 			Function: t.Function,
 			Package:  t.Package,
 			Receiver: t.Receiver,
@@ -153,14 +154,14 @@ func mergeFinding(into map[string]Finding, modules map[string]struct{}, buildMod
 		// Symbol-level finding: a call path into the vulnerable symbol.
 		current.CalledBy = true
 		current.ImportedBy = true
-		sym := model.AffectedSymbol{
+		sym := sdkmodel.AffectedSymbol{
 			Symbol:  sink.Function,
 			Kind:    symbolKind(sink),
 			Package: sink.Package,
 			Module:  sink.Module,
 		}
 		current.Symbols = appendUniqueSymbol(current.Symbols, sym)
-		current.CallPaths = append(current.CallPaths, model.CallPath{Sink: sym, Frames: frames})
+		current.CallPaths = append(current.CallPaths, sdkmodel.CallPath{Sink: sym, Frames: frames})
 	case sink.Package != "":
 		// Package-level finding: the vulnerable package is imported but
 		// no call into a vulnerable symbol was found.
@@ -206,19 +207,19 @@ func canonicalModuleVersion(version string) string {
 	return version
 }
 
-func positionToSDK(p *position) model.SourcePosition {
+func positionToSDK(p *position) sdkmodel.SourcePosition {
 	if p == nil {
-		return model.SourcePosition{}
+		return sdkmodel.SourcePosition{}
 	}
-	return model.SourcePosition{File: p.Filename, Line: p.Line, Column: p.Column}
+	return sdkmodel.SourcePosition{File: p.Filename, Line: p.Line, Column: p.Column}
 }
 
-func symbolKind(t traceEntry) model.SymbolKind {
+func symbolKind(t traceEntry) sdkmodel.SymbolKind {
 	if t.Receiver != "" {
-		return model.SymbolKindMethod
+		return sdkmodel.SymbolKindMethod
 	}
 	if t.Function != "" {
-		return model.SymbolKindFunction
+		return sdkmodel.SymbolKindFunction
 	}
 	return ""
 }
@@ -230,7 +231,7 @@ func appendUnique(values []string, candidate string) []string {
 	return append(values, candidate)
 }
 
-func appendUniqueSymbol(symbols []model.AffectedSymbol, candidate model.AffectedSymbol) []model.AffectedSymbol {
+func appendUniqueSymbol(symbols []sdkmodel.AffectedSymbol, candidate sdkmodel.AffectedSymbol) []sdkmodel.AffectedSymbol {
 	for _, s := range symbols {
 		if s.Symbol == candidate.Symbol && s.Package == candidate.Package && s.Kind == candidate.Kind {
 			return symbols
