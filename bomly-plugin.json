@@ -15,5 +15,29 @@
   },
   "description": "Go reachability analyzer for Bomly: runs govulncheck (golang.org/x/vuln) to mark which vulnerabilities are actually reachable from your code, at symbol and package tiers.",
   "homepage": "https://github.com/bomly-dev/bomly-plugin-govulncheck-analyzer",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "access": {
+    "filesystemRead": [
+      "cache",
+      "home",
+      "project"
+    ],
+    "filesystemWrite": [
+      "cache",
+      "home",
+      "temp"
+    ],
+    "network": [
+      "*",
+      "vuln.go.dev"
+    ],
+    "environment": [
+      "GO*",
+      "HOME",
+      "PATH"
+    ],
+    "subprocesses": [
+      "go"
+    ]
+  }
 }

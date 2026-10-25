@@ -46,6 +46,13 @@ func (a Analyzer) Descriptor() sdkplugin.AnalyzerDescriptor {
 		SupportedLanguages:  []sdkmodel.Language{sdkmodel.LanguageGo},
 		SupportedTiers:      []sdkmodel.ReachabilityTier{sdkmodel.TierSymbol, sdkmodel.TierPackage},
 		Capabilities:        []string{sdkplugin.CapabilityPackageUpdates},
+		// govulncheck analyzes Go source, and only annotates advisories a
+		// matcher already put in the registry for packages in the graph.
+		Requires: sdkplugin.Requirements{
+			sdkplugin.RequirementSourceTree,
+			sdkplugin.RequirementDependencyGraph,
+			sdkplugin.RequirementVulnerabilityRecords,
+		},
 	}
 }
 
