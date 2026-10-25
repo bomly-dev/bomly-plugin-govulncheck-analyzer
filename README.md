@@ -31,7 +31,7 @@ tier). Results are cached on disk under `<user cache dir>/bomly/analyzers/govuln
 | Writes `temp` | Scratch space for the Go toolchain's package loading |
 | Network `vuln.go.dev` | The Go vulnerability database govulncheck reads |
 | Network `*` | The `go` command may download missing modules from whatever `GOPROXY` names |
-| Environment `GO*`, `HOME`, `PATH` | Go toolchain settings, the cache location, and finding `go` |
+| Environment `GO*`, `HOME`, `PATH`, `XDG_CACHE_HOME`, `LocalAppData` | Go toolchain settings, finding `go`, and locating the user cache directory (`os.UserCacheDir` reads `HOME`, `XDG_CACHE_HOME` or `LocalAppData` by platform) |
 | Starts `go` | Package loading runs `go list` and `go env` |
 
 ## Embedded in the CLI

@@ -34,7 +34,9 @@
     "environment": [
       "GO*",
       "HOME",
-      "PATH"
+      "LocalAppData",
+      "PATH",
+      "XDG_CACHE_HOME"
     ],
     "subprocesses": [
       "go"
